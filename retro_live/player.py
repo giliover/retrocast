@@ -84,6 +84,8 @@ class VideoPlayer:
             result = subprocess.run([sys.executable, '-m', 'streamlink', '--stream-url', url, quality],
                                     capture_output=True, text=True, timeout=30, check=False)
             MONITOR.duration('video.streamlink_resolve',(time.perf_counter()-resolve_start)*1000)
+            if self.stop_flag.is_set():
+                return
             if result.returncode:
                 raise RuntimeError('Streamlink: ' + (result.stderr.strip()[-500:] or 'Falha ao resolver stream'))
             source = result.stdout.strip().splitlines()[-1]
@@ -93,6 +95,8 @@ class VideoPlayer:
             container = av.open(source, options={'reconnect':'1', 'reconnect_streamed':'1',
                                                   'reconnect_delay_max':'3'}, timeout=(10, 10))
             MONITOR.duration('video.open',(time.perf_counter()-open_start)*1000)
+            if self.stop_flag.is_set():
+                return
             video = next((s for s in container.streams if s.type == 'video'), None)
             audio = next((s for s in container.streams if s.type == 'audio'), None)
             if video is None:
@@ -203,10 +207,15 @@ class VideoPlayer:
     def close(self):
         self.stop_flag.set()
         if self.worker and self.worker.is_alive():
-            self.worker.join(timeout=2.0)
-        self.worker = None
+            self.worker.join(timeout=3.0)
+        stopped = not (self.worker and self.worker.is_alive())
+        if stopped:
+            self.worker = None
         with self._audio_lock:
             self._audio_chunks.clear()
             self._audio_offset = 0
             self._audio_samples = 0
+        self.frames = Queue(maxsize=2)
+        self.latest = None
         self._clock_start = None
+        return stopped

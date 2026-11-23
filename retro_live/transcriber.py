@@ -34,6 +34,8 @@ def transcribe(config, processes, events, stop):
         MONITOR.duration('ai.cpu_threads_configured',cpu_threads)
         MONITOR.duration('ai.workers_configured',workers)
         MONITOR.duration('ai.model_load',(time.perf_counter()-model_started)*1000)
+        if stop.is_set():
+            return
         events.put(Event('status', 'Conectando à transmissão...'))
         source = processes.start(['streamlink', '--stdout', config.url, config.quality],
                                  stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
@@ -80,6 +82,8 @@ def transcribe(config, processes, events, stop):
             count += 1
             if words:
                 events.put(Event('line', f'[{dt.datetime.now():%H:%M:%S}] {words}'))
+            if stop.is_set():
+                break
             events.put(Event('status', f'Transcrevendo • {count} blocos processados'))
             if len(buf) < chunk_size:
                 break

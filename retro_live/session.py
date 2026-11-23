@@ -23,7 +23,9 @@ class Session:
         if not self.config.url.strip():
             self.status = 'INSIRA UMA URL'
             return
-        self.close(save=False)
+        # WATCH always completes STOP before creating another capture.
+        if not self.close(save=False):
+            raise RuntimeError("Previous stream is still stopping; try again shortly")
         ProcessManager.check()
         self.events = Queue()
         self.stop = Event()
@@ -56,11 +58,19 @@ class Session:
         self.status = 'SALVO: ' + str(path)
 
     def close(self, save=True):
+        """Stop both pipelines. Never start a new one while an old worker lives."""
         self.stop.set()
-        self.processes.close()
-        self.video.close()
+        self.processes.close()  # Unblocks ffmpeg/stdout reads in transcription.
+        video_stopped = self.video.close()
         if self.thread and self.thread.is_alive():
-            self.thread.join(timeout=0.5)
+            self.thread.join(timeout=3.0)
+        transcription_stopped = not (self.thread and self.thread.is_alive())
+        if transcription_stopped:
+            self.thread = None
         self.running = False
+        # Old status and subtitle events must not reappear after STOP.
+        self.events = Queue()
+        self.status = 'STOPPED' if video_stopped and transcription_stopped else 'STOPPING...'
         if save and self.config.autosave and self.lines:
             self.save()
+        return video_stopped and transcription_stopped

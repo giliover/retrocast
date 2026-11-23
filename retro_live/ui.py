@@ -1,4 +1,5 @@
 """Retro desktop-style pygame UI. No web server."""
+from functools import lru_cache
 import math
 import time
 from .performance import MONITOR, measure
@@ -23,6 +24,7 @@ class RetroUI:
         self.clock=pygame.time.Clock()
         self.font=pygame.font.SysFont('dejavusansmono',17)
         self.small=pygame.font.SysFont('dejavusansmono',13)
+        self.tiny=pygame.font.SysFont('dejavusansmono',11)
         self.large=pygame.font.SysFont('dejavusansmono',25,bold=True)
         self.session=Session()
         self.preferences=Preferences()
@@ -54,18 +56,26 @@ class RetroUI:
         self.perf_visible=False
         self.perf_metrics={}
         self.perf_counts={}
+        self._transcript_revision=0
+        self._rows_key=None
         self._scaled_frame=None
         self._scaled_frame_key=None
 
     def tr(self, key):
         return translate(self.preferences.language, key)
 
+    @lru_cache(maxsize=512)
+    def render_text(self, font, text, color):
+        return font.render(text, True, color)
+
     def txt(self, text, x,y, color=None, font=None, maxwidth=None):
         font=font or self.font
         color=self.palette.text if color is None else color
-        if maxwidth:
-            while text and font.size(text)[0]>maxwidth: text=text[:-2]+'…'
-        self.screen.blit(font.render(text,True,color),(x,y))
+        if maxwidth is not None and font.size(text)[0]>maxwidth:
+            if maxwidth<font.size('…')[0]: return
+            while text and font.size(text+'…')[0]>maxwidth: text=text[:-1]
+            text+='…'
+        self.screen.blit(self.render_text(font,text,color),(x,y))
 
     def rect(self, box, fill=None, border=None, radius=3):
         fill=self.palette.panel if fill is None else fill
@@ -84,14 +94,15 @@ class RetroUI:
         available=max(8,self.buttons[name].width-16)
         text_font=font
         if font.size(label)[0]>available:
-            text_font=pygame.font.SysFont('dejavusansmono',11)
+            text_font=self.tiny
         if text_font.size(label)[0]>available:
             while label and text_font.size(label+'…')[0]>available:
                 label=label[:-1]
             label+='…'
-        text=text_font.render(label,True,self.palette.black if active else self.palette.text)
+        text=self.render_text(text_font,label,self.palette.black if active else self.palette.text)
         self.screen.blit(text,text.get_rect(center=self.buttons[name].center))
 
+    @lru_cache(maxsize=4096)
     def wrap(self, text, max_width, font):
         result=[]; line=''
         for word in text.split():
@@ -143,6 +154,33 @@ class RetroUI:
                 self.screen.blit(rendered,rendered.get_rect(centerx=w//2,y=h-box_h-25+i*line_height))
         pygame.display.flip()
 
+    def draw_video_region(self, video):
+        self.rect(video,self.palette.black)
+        if self.frame:
+            fw,fh=self.frame.get_size()
+            scale=min((video.width-4)/fw,(video.height-4)/fh)
+            target=(max(1,int(fw*scale)),max(1,int(fh*scale)))
+            key=(id(self.frame), target)
+            if key != self._scaled_frame_key:
+                with measure('ui.video_scale'):
+                    self._scaled_frame=pygame.transform.scale(self.frame,target)
+                self._scaled_frame_key=key
+            self.screen.blit(self._scaled_frame,self._scaled_frame.get_rect(center=video.center))
+        else:
+            self.txt('[ '+self.tr('nosignal')+' ]',video.centerx-100,video.centery-25,self.palette.accent,self.large)
+            self.txt('> '+self.tr('waiting'),video.centerx-115,video.centery+13,self.palette.muted,self.small)
+        # Subtitles are drawn over video, including semi-transparent backing.
+        if self.subtitle and self.session.lines:
+            last=self.session.lines[-1].split('] ',1)[-1]
+            subtitle_lines=self.wrap(last,video.width-75,self.font)[-3:]
+            sh=18+len(subtitle_lines)*24
+            surf=pygame.Surface((video.width-28,sh),pygame.SRCALPHA)
+            surf.fill((8,12,17,220))
+            self.screen.blit(surf,(video.x+14,video.bottom-sh-18))
+            for i,line in enumerate(subtitle_lines):
+                render=self.font.render(line,True,self.palette.text)
+                self.screen.blit(render,render.get_rect(centerx=video.centerx,y=video.bottom-sh-10+i*24))
+
     def draw(self):
         if self.video_fullscreen:
             self.draw_fullscreen_video()
@@ -170,40 +208,21 @@ class RetroUI:
         self.button('history',self.tr('history'),(20,121,135,29))
         video_w=max(320,int((w-58)*0.64)); right_x=video_w+38; right_w=w-right_x-20
         video=pygame.Rect(20,158,video_w,max(220,h-305))
-        self.rect(video,self.palette.black)
-        if self.frame:
-            fw,fh=self.frame.get_size()
-            scale=min((video.width-4)/fw,(video.height-4)/fh)
-            target=(max(1,int(fw*scale)),max(1,int(fh*scale)))
-            key=(id(self.frame), target)
-            if key != self._scaled_frame_key:
-                with measure('ui.video_scale'):
-                    self._scaled_frame=pygame.transform.scale(self.frame,target)
-                self._scaled_frame_key=key
-            self.screen.blit(self._scaled_frame,self._scaled_frame.get_rect(center=video.center))
-        else:
-            self.txt('[ '+self.tr('nosignal')+' ]',video.centerx-100,video.centery-25,self.palette.accent,self.large)
-            self.txt('> '+self.tr('waiting'),video.centerx-115,video.centery+13,self.palette.muted,self.small)
-        # Subtitles are drawn over video, including semi-transparent backing.
-        if self.subtitle and self.session.lines:
-            last=self.session.lines[-1].split('] ',1)[-1]
-            subtitle_lines=self.wrap(last,video.width-75,self.font)[-3:]
-            sh=18+len(subtitle_lines)*24
-            surf=pygame.Surface((video.width-28,sh),pygame.SRCALPHA)
-            surf.fill((8,12,17,220))
-            self.screen.blit(surf,(video.x+14,video.bottom-sh-18))
-            for i,line in enumerate(subtitle_lines):
-                render=self.font.render(line,True,self.palette.text)
-                self.screen.blit(render,render.get_rect(centerx=video.centerx,y=video.bottom-sh-10+i*24))
+        self.video_rect=video
+        self.draw_video_region(video)
         self.rect((right_x,158,right_w,video.height))
         self.txt(self.tr('transcript').upper(),right_x+14,172,self.palette.accent,self.small,maxwidth=right_w-165)
         pygame.draw.line(self.screen,self.palette.edge,(right_x+12,201),(right_x+right_w-12,201))
         transcript_area=pygame.Rect(right_x+12,213,right_w-24,video.height-85)
         previous=self.screen.get_clip(); self.screen.set_clip(transcript_area)
-        rows=[]
-        for line in self.session.lines:
-            rows.extend(self.wrap(line,right_w-40,self.small)); rows.append('')
-        self.transcript_rows=rows
+        key=(right_w, self._transcript_revision)
+        if key != self._rows_key:
+            rows=[]
+            for line in self.session.lines:
+                rows.extend(self.wrap(line,right_w-40,self.small)); rows.append('')
+            self.transcript_rows=rows
+            self._rows_key=key
+        rows=self.transcript_rows
         self.transcript_page.page_size=max(1,transcript_area.height//20)
         if self.transcript_follow:
             self.transcript_page.page=self.transcript_page.pages(len(rows))-1
@@ -273,8 +292,12 @@ class RetroUI:
                 self.history.add(self.url)
                 self.show_suggestions=False
                 self.url_active=False
-                self.session.start(); self.scroll=0; self.frame=None; self.transcript_page.reset(); self.transcript_follow=True
-            elif name=='stop': self.session.close()
+                self.session.start(); self._transcript_revision+=1; self.scroll=0; self.frame=None; self._scaled_frame=None; self._scaled_frame_key=None; self.transcript_page.reset(); self.transcript_follow=True
+            elif name=='stop':
+                self.session.close()
+                self.frame=None
+                self._scaled_frame=None
+                self._scaled_frame_key=None
             elif name=='history': self.history_open=not self.history_open; self.history_page.reset()
             elif name=='history_close': self.history_open=False
             elif name=='history_prev': self.history_page.move(-1,len(self.history.items))
@@ -369,10 +392,23 @@ class RetroUI:
             self.transcript_follow=self.transcript_page.page==self.transcript_page.pages(len(self.transcript_rows))-1
 
     def run(self):
+        self.draw()
+        hover=None
         while self.running:
+            # Block when idle; active video is sampled at up to 30 Hz.
+            timeout=33 if self.session.running else (1000 if self.perf_visible else 0)
+            first=pygame.event.wait(timeout) if timeout else pygame.event.wait()
+            events=[first]+pygame.event.get()
+            dirty=False
             frame_started=time.perf_counter()
             events_started=time.perf_counter()
-            for event in pygame.event.get():
+            for event in events:
+                if event.type==pygame.MOUSEMOTION:
+                    current=next((name for name,rect in self.buttons.items() if rect.collidepoint(event.pos)),None)
+                    dirty=dirty or current!=hover
+                    hover=current
+                elif event.type!=pygame.NOEVENT:
+                    dirty=True
                 if event.type==pygame.QUIT:
                     self.running=False
                 elif event.type==pygame.MOUSEBUTTONDOWN:
@@ -413,7 +449,7 @@ class RetroUI:
                     if self.video_fullscreen: continue
                     self.navigate_wheel(event.y,pygame.mouse.get_pos())
                 elif event.type==pygame.KEYDOWN:
-                    if event.key in (pygame.K_F11, pygame.K_f):
+                    if event.key==pygame.K_F11 or (event.key==pygame.K_f and not self.url_active):
                         self.action('fullscreen')
                         continue
                     if self.video_fullscreen:
@@ -474,8 +510,13 @@ class RetroUI:
                         self.url_active=True
                         self.refresh_suggestions()
             MONITOR.duration('ui.events', (time.perf_counter()-events_started)*1000)
+            if not self.running: break
+            old_status=self.session.status
             with measure('ui.session_poll'):
-                self.session.poll()
+                changed=self.session.poll()
+            if changed:
+                self._transcript_revision+=1
+            dirty=dirty or changed or old_status!=self.session.status
             item=self.session.video.poll()
             if item:
                 raw,size=item
@@ -484,14 +525,23 @@ class RetroUI:
                         self.frame=pygame.image.frombuffer(raw,size,'RGB').copy()
                         MONITOR.increment('video.frames_presented_to_ui')
                 except Exception as exc: self.session.status='FRAME: '+str(exc)
-            with measure('ui.draw'):
-                self.draw()
-            self.clock.tick(30)
+            if dirty or item:
+                with measure('ui.draw'):
+                    if not dirty and not self.video_fullscreen and not self.history_open and not self.show_suggestions and not self.perf_visible:
+                        self.draw_video_region(self.video_rect)
+                        pygame.display.update(self.video_rect)
+                        MONITOR.increment('ui.partial_draws')
+                    else:
+                        self.draw()
+                        MONITOR.increment('ui.full_draws')
+                MONITOR.increment('ui.frames')
+            if self.session.running:
+                self.clock.tick(30)
             MONITOR.duration('ui.frame_total', (time.perf_counter()-frame_started)*1000)
-            MONITOR.increment('ui.frames')
             MONITOR.duration('ui.actual_fps', self.clock.get_fps())
             report=MONITOR.report_if_due()
             if report:
                 self.perf_metrics,self.perf_counts=report
+                if self.perf_visible: self.draw()
         self.session.close()
         pygame.quit()
