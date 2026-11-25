@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/retrocast"
+exec 9>"$ROOT/lifecycle.lock"
+flock -s -n 9 || { echo 'RetroCast is being updated.' >&2; exit 1; }
+APP=$(readlink -f "$ROOT/current")
+cd "$APP"
+# Keep lock in parent while the player runs, even if Python closes inherited descriptors.
+"$APP/.venv/bin/python" "$APP/app.py" "$@"

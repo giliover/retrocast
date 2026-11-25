@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+[[ $(id -u) != 0 ]] || { echo 'Run as a regular user.' >&2; exit 1; }
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/retrocast"
+mkdir -p "$ROOT/releases"
+exec 9>"$ROOT/lifecycle.lock"
+flock -n -x 9 || { echo 'Close RetroCast or wait for another update to finish.' >&2; exit 1; }
+REPO='https://github.com/giliover/retrocast.git'
+activate() { local tmp; tmp=$(mktemp -d "$ROOT/.switch.XXXXXXXX"); ln -s "$1" "$tmp/link"; mv -Tf "$tmp/link" "$ROOT/$2"; rmdir "$tmp"; }
+valid_release() { [[ "$1" =~ ^releases/release\.[a-zA-Z0-9]+$ && -x "$ROOT/$1/.venv/bin/python" && -f "$ROOT/$1/app.py" ]]; }
+current=$(readlink "$ROOT/current" || true)
+previous=$(readlink "$ROOT/previous" || true)
+case ${1:-} in
+ --rollback) valid_release "$previous" || { echo 'No rollback available.' >&2; exit 1; }; valid_release "$current" || exit 1; activate "$current" previous; activate "$previous" current; echo 'Rollback complete.'; exit 0;;
+ --version) [[ -n "$current" ]] && git -C "$ROOT/$current" rev-parse --short HEAD; exit;;
+ ''|--force) ;;
+ *) echo 'Usage: update_retrocast [--force|--rollback|--version]' >&2; exit 2;;
+esac
+release=$(mktemp -d "$ROOT/releases/release.XXXXXXXX")
+relative="releases/${release##*/}"
+committed=0
+cleanup() { if [[ $committed == 0 && $(readlink "$ROOT/current" || true) != "$relative" ]]; then rm -rf -- "$release"; fi; }
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
+# Clone only the fixed official repository; never run its installer during update.
+git -c protocol.ext.allow=never clone --depth 1 -- "$REPO" "$release"
+if valid_release "$current" && [[ ${1:-} != --force ]] && [[ $(git -C "$release" rev-parse HEAD) == $(git -C "$ROOT/$current" rev-parse HEAD) ]]; then echo 'Already up to date.'; exit 0; fi
+[[ -f "$release/app.py" && -f "$release/requirements.txt" && -d "$release/retro_live" ]] || { echo 'Invalid project layout.' >&2; exit 1; }
+python3 -m venv "$release/.venv"
+"$release/.venv/bin/python" -m pip install -r "$release/requirements.txt"
+"$release/.venv/bin/python" -m pip check
+"$release/.venv/bin/python" -m compileall -q "$release/app.py" "$release/retro_live"
+"$release/.venv/bin/python" -m streamlink --version
+if valid_release "$current"; then activate "$current" previous; fi
+activate "$relative" current
+committed=1
+# Retain the active and previous release only. No user data is removed.
+for dir in "$ROOT"/releases/release.*; do
+  [[ -d "$dir" && ! -L "$dir" ]] || continue
+  rel="releases/${dir##*/}"
+  [[ "$rel" == "$relative" || "$rel" == "$current" ]] || rm -rf -- "$dir"
+done
+echo "Updated: $(git -C "$release" rev-parse --short HEAD)"

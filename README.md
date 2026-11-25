@@ -4,30 +4,35 @@ Player de transmissões ao vivo com legendas automáticas.
 
 ## Instalação (Linux)
 
-Tenha Python 3, FFmpeg e PortAudio instalados. No Arch Linux:
+No Arch Linux:
 
 ```bash
-sudo pacman -S --needed python ffmpeg portaudio
+sudo pacman -S --needed git python ffmpeg portaudio util-linux
 ```
 
-Extraia o projeto, abra o terminal na pasta `retrocast` e execute:
+Clone o repositório oficial e execute:
 
 ```bash
+git clone https://github.com/giliover/retrocast.git
+cd retrocast
 bash install.sh
 ```
 
-## Executar
+Se extraiu um ZIP, basta executar `bash install.sh` dentro da pasta.
 
-Abra o RetroCast no menu de aplicativos ou execute:
+## Executar e atualizar
 
 ```bash
-"${XDG_BIN_HOME:-$HOME/.local/bin}/retrocast"
+retrocast
+update_retrocast
 ```
+
+Feche o player antes de atualizar. Para voltar à versão anterior: `update_retrocast --rollback`.
+
+Se os comandos não forem encontrados: `export PATH="$HOME/.local/bin:$PATH"`.
 
 ## Desinstalar
 
-Na pasta do projeto:
-
 ```bash
-bash uninstall.sh
+bash ~/.local/share/retrocast/current/uninstall.sh
 ```

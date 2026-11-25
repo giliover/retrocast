@@ -3,7 +3,7 @@ import sys
 import threading
 import unittest
 from unittest.mock import patch
-from retro_live.capture import StreamCapture
+from retro_live.capture import StreamCapture, classify_stderr
 
 
 class CaptureTests(unittest.TestCase):
@@ -35,3 +35,22 @@ class CaptureTests(unittest.TestCase):
         with patch('retro_live.capture.subprocess.Popen') as mock:
             self.assertIsNone(StreamCapture().start('https://www.twitch.tv/example', 'best', stop))
             mock.assert_not_called()
+
+    def test_diagnostic_is_fixed_category(self):
+        self.assertEqual(classify_stderr('error: 403 https://example.org/?token=secret'), 'access_denied')
+        self.assertEqual(classify_stderr('No playable streams found'), 'stream_unavailable')
+        self.assertEqual(classify_stderr('No module named streamlink'), 'module_missing')
+
+    def test_stderr_drained_and_quality_fallback(self):
+        real_popen = subprocess.Popen
+        capture = StreamCapture()
+        with patch('retro_live.capture.subprocess.Popen', side_effect=lambda *a, **kw: real_popen([sys.executable, '-c', 'import sys; sys.stderr.write("error: 403 token=secret\\n" * 10000); sys.stdout.buffer.write(b"media")'], **kw)) as mock:
+            with self.assertLogs('retrocast.application', level='INFO') as logs:
+                try:
+                    source = capture.start('https://www.twitch.tv/example', '720p', threading.Event())
+                    self.assertEqual(source.read(), b'media')
+                    self.assertEqual(mock.call_args.args[0][-1], '720p,best')
+                finally:
+                    capture.close()
+            self.assertIn('category=access_denied', '\n'.join(logs.output))
+            self.assertNotIn('secret', '\n'.join(logs.output))
