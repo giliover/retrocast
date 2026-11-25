@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+umask 077
+usage() { echo 'Usage: uninstall_retrocast [--purge|--help]'; }
+[[ $# -le 1 ]] || { usage >&2; exit 2; }
+case ${1:-} in
+  --help) usage; exit 0;;
+  ''|--purge) ;;
+  *) usage >&2; exit 2;;
+esac
+[[ $(id -u) != 0 ]] || { echo 'Run as a regular user.' >&2; exit 1; }
+ROOT="${XDG_DATA_HOME:-$HOME/.local/share}/retrocast"
+BIN="${XDG_BIN_HOME:-$HOME/.local/bin}"
+DESKTOP="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/retrocast"
+STATE="${XDG_STATE_HOME:-$HOME/.local/state}/retrocast"
+# Reject relative paths, traversal and symlinked application directories.
+for path in "$ROOT" "$BIN" "$DESKTOP" "$CONFIG" "$STATE"; do
+  [[ "$path" == /* && "$path" != / && "$path/" != */../* && "$path/" != */./* ]] || { echo 'Unsafe XDG path.' >&2; exit 1; }
+done
+for path in "$ROOT" "$CONFIG" "$STATE"; do
+  [[ ! -L "$path" ]] || { echo 'Refusing symlinked application directory.' >&2; exit 1; }
+done
+# Keep the lock inode stable across uninstall/reinstall; never delete it.
+mkdir -p -m 700 -- "$ROOT"
+[[ -O "$ROOT" && ! -L "$ROOT/lifecycle.lock" ]] || { echo 'Unsafe lifecycle directory.' >&2; exit 1; }
+exec 9>>"$ROOT/lifecycle.lock"
+flock -n -x 9 || { echo 'Close RetroCast or wait for the update to finish.' >&2; exit 1; }
+rm -f -- "$ROOT/current" "$ROOT/previous" "$ROOT/repository" "$DESKTOP/retrocast.desktop"
+rm -rf -- "$ROOT/releases"
+if [[ ${1:-} == --purge ]]; then
+  rm -rf -- "$CONFIG" "$STATE"
+  echo 'Local preferences, history and logs removed.'
+else
+  echo 'Preferences, history and logs preserved.'
+fi
+rm -f -- "$BIN/retrocast" "$BIN/update_retrocast" "$BIN/uninstall_retrocast"
+echo 'RetroCast uninstalled. Shared models and system dependencies preserved.'

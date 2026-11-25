@@ -11,7 +11,7 @@ REPO='https://github.com/giliover/retrocast.git'
 [[ $# == 0 ]] || { echo 'Usage: bash install.sh' >&2; exit 2; }
 mkdir -p "$ROOT" "$BIN" "$DESKTOP"
 # Migrate the legacy repository setting; the updater uses the fixed official URL.
-for name in retrocast update_retrocast; do
+for name in retrocast update_retrocast uninstall_retrocast; do
   tmp=$(mktemp "$BIN/.retrocast.XXXXXXXX")
   install -m 755 "$APP_DIR/lifecycle/$name" "$tmp"
   mv -Tf "$tmp" "$BIN/$name"

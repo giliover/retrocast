@@ -9,6 +9,18 @@ flock -n -x 9 || { echo 'Close RetroCast or wait for another update to finish.' 
 REPO='https://github.com/giliover/retrocast.git'
 activate() { local tmp; tmp=$(mktemp -d "$ROOT/.switch.XXXXXXXX"); ln -s "$1" "$tmp/link"; mv -Tf "$tmp/link" "$ROOT/$2"; rmdir "$tmp"; }
 valid_release() { [[ "$1" =~ ^releases/release\.[a-zA-Z0-9]+$ && -x "$ROOT/$1/.venv/bin/python" && -f "$ROOT/$1/app.py" ]]; }
+install_uninstaller() {
+  local source="$1/lifecycle/uninstall_retrocast" tmp
+  local bin="${XDG_BIN_HOME:-$HOME/.local/bin}"
+  [[ -f "$source" ]] || return 0
+  bash -n "$source"
+  mkdir -p -- "$bin"
+  tmp=$(mktemp "$bin/.retrocast.XXXXXXXX")
+  if ! install -m 755 "$source" "$tmp" || ! mv -Tf "$tmp" "$bin/uninstall_retrocast"; then
+    rm -f -- "$tmp"
+    return 1
+  fi
+}
 current=$(readlink "$ROOT/current" || true)
 previous=$(readlink "$ROOT/previous" || true)
 case ${1:-} in
@@ -26,13 +38,14 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 # Clone only the fixed official repository; never run its installer during update.
 git -c protocol.ext.allow=never clone --depth 1 -- "$REPO" "$release"
-if valid_release "$current" && [[ ${1:-} != --force ]] && [[ $(git -C "$release" rev-parse HEAD) == $(git -C "$ROOT/$current" rev-parse HEAD) ]]; then echo 'Already up to date.'; exit 0; fi
+if valid_release "$current" && [[ ${1:-} != --force ]] && [[ $(git -C "$release" rev-parse HEAD) == $(git -C "$ROOT/$current" rev-parse HEAD) ]]; then install_uninstaller "$release"; echo 'Already up to date.'; exit 0; fi
 [[ -f "$release/app.py" && -f "$release/requirements.txt" && -d "$release/retro_live" ]] || { echo 'Invalid project layout.' >&2; exit 1; }
 python3 -m venv "$release/.venv"
 "$release/.venv/bin/python" -m pip install -r "$release/requirements.txt"
 "$release/.venv/bin/python" -m pip check
 "$release/.venv/bin/python" -m compileall -q "$release/app.py" "$release/retro_live"
 "$release/.venv/bin/python" -m streamlink --version
+install_uninstaller "$release"
 if valid_release "$current"; then activate "$current" previous; fi
 activate "$relative" current
 committed=1

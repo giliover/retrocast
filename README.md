@@ -20,19 +20,23 @@ bash install.sh
 
 Se extraiu um ZIP, basta executar `bash install.sh` dentro da pasta.
 
-## Executar e atualizar
+## Comandos disponíveis
+
+| Comando | Descrição |
+| --- | --- |
+| `retrocast` | Abre o player. |
+| `update_retrocast` | Atualiza para a última versão do repositório oficial. |
+| `update_retrocast --force` | Força a reinstalação da versão mais recente. |
+| `update_retrocast --rollback` | Restaura a versão anterior, se disponível. |
+| `update_retrocast --version` | Exibe o commit instalado. |
+| `uninstall_retrocast` | Desinstala, preservando preferências, histórico e logs. |
+| `uninstall_retrocast --purge` | Desinstala e remove também preferências, histórico e logs. |
+| `uninstall_retrocast --help` | Exibe a ajuda do desinstalador. |
+
+Feche o player antes de atualizar ou desinstalar. Os modelos compartilhados do Whisper e as dependências do sistema são preservados na desinstalação.
+
+Se os comandos não forem encontrados, execute:
 
 ```bash
-retrocast
-update_retrocast
-```
-
-Feche o player antes de atualizar. Para voltar à versão anterior: `update_retrocast --rollback`.
-
-Se os comandos não forem encontrados: `export PATH="$HOME/.local/bin:$PATH"`.
-
-## Desinstalar
-
-```bash
-bash ~/.local/share/retrocast/current/uninstall.sh
+export PATH="$HOME/.local/bin:$PATH"
 ```
