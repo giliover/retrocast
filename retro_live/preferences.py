@@ -1,5 +1,5 @@
 """Persistent UI preferences in XDG_CONFIG_HOME."""
-import json
+from .storage import read_json, write_json
 import os
 from pathlib import Path
 from .themes import THEMES
@@ -15,14 +15,11 @@ class Preferences:
 
     def load(self):
         try:
-            obj=json.loads(self.path.read_text(encoding="utf-8"))
+            obj=read_json(self.path)
             if obj.get("theme") in THEMES: self.theme=obj["theme"]
             if obj.get("language") in LANGUAGES: self.language=obj["language"]
         except (OSError, ValueError, TypeError, AttributeError):
             pass
 
     def save(self):
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        temp=self.path.with_suffix(".tmp")
-        temp.write_text(json.dumps({"theme":self.theme,"language":self.language},indent=2),encoding="utf-8")
-        temp.replace(self.path)
+        write_json(self.path, {"theme": self.theme, "language": self.language})

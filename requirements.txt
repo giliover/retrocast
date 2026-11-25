@@ -1,6 +1,6 @@
-pygame-ce>=2.5.3,<3
-av>=14,<18
-sounddevice>=0.5,<1
+pygame-ce
+av
+numpy
+sounddevice
+faster-whisper
 streamlink>=7,<9
-faster-whisper>=1.1,<2
-numpy>=1.26,<3

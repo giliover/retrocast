@@ -30,10 +30,6 @@ if [[ ! -x "$VENV_DIR/bin/python" ]]; then
 fi
 "$VENV_DIR/bin/python" -m pip install --upgrade pip
 "$VENV_DIR/bin/python" -m pip install -r "$APP_DIR/requirements.txt"
-# Streamlink needs fresh plugins for Twitch/YouTube and must be installed
-# in THIS venv, regardless of a system-level executable.
-echo 'Updating Streamlink inside RetroCast virtualenv (no pip cache)...'
-"$VENV_DIR/bin/python" -m pip install --no-cache-dir --upgrade 'streamlink>=7,<9'
 echo 'Checking Streamlink runtime...'
 "$VENV_DIR/bin/python" -m pip show streamlink >/dev/null
 "$VENV_DIR/bin/python" -m streamlink --version

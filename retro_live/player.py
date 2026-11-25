@@ -1,221 +1,287 @@
-"""PyAV/FFmpeg video decoder + PortAudio audio output, no MPV.
-The worker never calls pygame; only the main UI thread creates pygame surfaces.
-"""
-import collections
-import subprocess
-import sys
+"""Single capture, bounded timestamped audio/video buffers and shared playback clock."""
+import logging
 import threading
 import time
-from .performance import MONITOR, measure
-from queue import Queue, Empty
-
-import av
+import traceback
+from .capture import StreamCapture
+from queue import Queue, Full
+from collections import deque
+from .packet_buffer import PacketBuffer
+from .video_decoder import decode_video
 import numpy as np
+from .performance import MONITOR
+
+LOG = logging.getLogger('retrocast.application')
+RATE = 48000
+BLOCK = 4800
 
 
 class VideoPlayer:
     def __init__(self):
-        self.frames = Queue(maxsize=2)
         self.stop_flag = threading.Event()
         self.worker = None
+        self.capture = StreamCapture()
         self.error = None
-        self.latest = None
         self.paused = False
-        self.volume = 0.8
+        self.volume = .8
+        self.delay = 40
         self.audio = None
-        self._audio_lock = threading.Lock()
-        self._audio_chunks = collections.deque()
-        self._audio_offset = 0
-        self._audio_samples = 0
-        self._max_audio_samples = 48000 * 3
-        self._sample_rate = 48000
-        self._clock_start = None
-        self._last_video_pts = None
-        self._last_video_wall = None
-        self.target_video_fps = 30
+        self.lock = threading.Lock()
+        self.frames = deque(maxlen=12)
+        self.packets = PacketBuffer()
+        self._video_generation = 0
+        self._video_target = None
+        self._video_ready = -1.0
+        self._decoder = None
+        self._capture_done = False
+        self.fps = 30.0
+        self.sound = {}
+        self.jobs = Queue(maxsize=30)
+        self.latest = -1.0
+        self.position = None
+        self._last_frame = None
+        self._wall = None
+        self._play_sample = None
+        self._origin = None
+        self._audio_next = 0
+        self._pending = np.empty((0, 2), dtype=np.float32)
+        self._pcm = []
+        self._pcm_start = 0
+        self._last_video = -1
+        self._last_audio = -1
+        self.video_latest = -1.0
+        self._ended = False
+        self._resume_edge = None
 
-    def start(self, url, quality='best'):
-        self.close()
-        self.stop_flag.clear()
-        self.error = None
-        self.paused = False
-        self.frames = Queue(maxsize=2)
-        self._clock_start = None
-        self._last_video_pts = None
-        self._last_video_wall = None
+    def start(self, url, quality='auto', delay=40):
+        if not self.close():
+            raise RuntimeError('Previous player still stopping')
+        self.__init__()
+        self.delay = delay
         self.worker = threading.Thread(target=self._run, args=(url, quality), daemon=True)
         self.worker.start()
 
-    def _audio_callback(self, outdata, frames, time_info, status):
-        outdata.fill(0)
-        if self.paused or self.stop_flag.is_set():
-            return
-        written = 0
-        with self._audio_lock:
-            while written < frames and self._audio_chunks:
-                head = self._audio_chunks[0]
-                available = len(head) - self._audio_offset
-                take = min(available, frames - written)
-                outdata[written:written+take] = head[self._audio_offset:self._audio_offset+take] * self.volume
-                written += take
-                self._audio_offset += take
-                self._audio_samples -= take
-                if self._audio_offset >= len(head):
-                    self._audio_chunks.popleft()
-                    self._audio_offset = 0
+    def set_delay(self, seconds):
+        with self.lock:
+            self.delay = max(10, min(120, int(seconds)))
+            self.position = None
+            self._last_frame = None
+            self._play_sample = None
+            self._wall = None
+            self._resume_edge = None
+            self._reset_video()
 
-    def _enqueue_audio(self, chunk):
-        if chunk.size == 0:
+    def _reset_video(self):
+        self._video_generation += 1
+        self._video_ready = -1.0
+        self._video_target = None
+        self.frames.clear()
+
+    def _time(self, frame):
+        if frame.time is None:
+            return None
+        pts = float(frame.time)
+        if self._origin is None:
+            self._origin = pts
+        return max(0.0, pts - self._origin)
+
+    def _callback(self, outdata, frames, time_info, status):
+        outdata.fill(0)
+        if self.stop_flag.is_set():
             return
-        with self._audio_lock:
-            # Limit latency and memory when inference or rendering is slow.
-            while self._audio_chunks and self._audio_samples + len(chunk) > self._max_audio_samples:
-                old = self._audio_chunks.popleft()
-                self._audio_samples -= len(old) - self._audio_offset
-                self._audio_offset = 0
-            self._audio_chunks.append(chunk)
-            self._audio_samples += len(chunk)
+        with self.lock:
+            if self.paused:
+                return
+            edge = min(self.latest, self.video_latest)
+            if self._play_sample is None:
+                if self._resume_edge is not None and edge < self._resume_edge and not self._ended:
+                    return
+                self._resume_edge = None
+                if edge < 0 or (edge < self.delay and not self._ended):
+                    return
+                target = max(0., edge-self.delay)
+                if self._decoder is not None:
+                    if not self.packets.keys:
+                        return
+                    target = max(target, self.packets.keys[0][1], (next(iter(self.sound), 0)*BLOCK)/RATE)
+                    if target > edge:
+                        return
+                    if self._video_target is None:
+                        self._video_target = target
+                    target = self._video_target
+                    if self._video_ready < target:
+                        return
+                self._play_sample = int(target*RATE)
+            if edge - self._play_sample/RATE > 125:
+                self._play_sample = None
+                self.position = None
+                self._reset_video()
+                self._last_frame = None
+                return
+            if not self._ended and self._play_sample + frames > int(edge*RATE):
+                # Refill instead of advancing across an unavailable interval.
+                self._play_sample = None
+                self.position = None
+                self._resume_edge = edge + self.delay
+                self._reset_video()
+                MONITOR.increment('audio.rebuffer')
+                return
+            sample = self._play_sample
+            if self._decoder is not None:
+                self._video_target = sample / RATE
+                if self._video_ready + .10 < self._video_target and not self._ended:
+                    return
+            if self._ended and sample >= int(edge*RATE):
+                self.position = edge
+                return
+            self.position = sample / RATE
+            written = 0
+            limit = min(frames, max(0, int(edge*RATE)-sample)) if self._ended else frames
+            while written < limit:
+                index, offset = divmod(sample, BLOCK)
+                take = min(limit - written, BLOCK - offset)
+                data = self.sound.get(index)
+                if data is not None:
+                    outdata[written:written+take] = data[offset:offset+take] * self.volume
+                sample += take
+                written += take
+            self._play_sample = sample
+
+    def _store_audio(self, samples, pts):
+        # The stereo playback blocks and mono inference blocks share the same timeline.
+        expected = self._audio_next + len(self._pending)
+        actual = int(round(pts * RATE))
+        if abs(actual - expected) > RATE // 2:
+            self._pending = np.empty((0, 2), dtype=np.float32)
+            self._pcm.clear()
+            self._audio_next = max(0, actual // BLOCK * BLOCK)
+        self._pending = np.concatenate((self._pending, samples))
+        while len(self._pending) >= BLOCK:
+            block = self._pending[:BLOCK].copy()
+            self._pending = self._pending[BLOCK:]
+            index = self._audio_next // BLOCK
+            with self.lock:
+                self.sound[index] = block
+                self.sound.pop(index - 1300, None)
+                # Bound storage even after timestamp discontinuities.
+                if len(self.sound) > 1300:
+                    self.sound.pop(next(iter(self.sound)))
+                self.latest = max(self.latest, (index + 1) * .1)
+            if not self._pcm:
+                self._pcm_start = index * .1
+            self._pcm.append(block.reshape(-1, 3, 2).mean(axis=(1, 2), dtype=np.float32))
+            if len(self._pcm) == 50:
+                job = (self._pcm_start, np.concatenate(self._pcm))
+                self._pcm.clear()
+                try:
+                    self.jobs.put_nowait(job)
+                except Full:
+                    MONITOR.increment('ai.jobs_dropped')
+            self._audio_next += BLOCK
 
     def _run(self, url, quality):
         container = None
+        stage = 'dependencies'
         try:
+            import av
             import sounddevice as sd
-            resolve_start=time.perf_counter()
-            result = subprocess.run([sys.executable, '-m', 'streamlink', '--stream-url', url, quality],
-                                    capture_output=True, text=True, timeout=30, check=False)
-            MONITOR.duration('video.streamlink_resolve',(time.perf_counter()-resolve_start)*1000)
-            if self.stop_flag.is_set():
+            stage = 'streamlink_start'
+            source = self.capture.start(url, quality, self.stop_flag)
+            if source is None:
                 return
-            if result.returncode:
-                raise RuntimeError('Streamlink: ' + (result.stderr.strip()[-500:] or 'Falha ao resolver stream'))
-            source = result.stdout.strip().splitlines()[-1]
-            if not source:
-                raise RuntimeError('Streamlink nao retornou URL de midia')
-            open_start=time.perf_counter()
-            container = av.open(source, options={'reconnect':'1', 'reconnect_streamed':'1',
-                                                  'reconnect_delay_max':'3'}, timeout=(10, 10))
-            MONITOR.duration('video.open',(time.perf_counter()-open_start)*1000)
-            if self.stop_flag.is_set():
-                return
-            video = next((s for s in container.streams if s.type == 'video'), None)
-            audio = next((s for s in container.streams if s.type == 'audio'), None)
-            if video is None:
-                raise RuntimeError('A transmissao nao contem video')
-            resampler = None
-            if audio is not None:
-                resampler = av.AudioResampler(format='flt', layout='stereo', rate=self._sample_rate)
-                try:
-                    self.audio = sd.OutputStream(samplerate=self._sample_rate, channels=2,
-                                                 dtype='float32', blocksize=2048,
-                                                 callback=self._audio_callback)
-                    self.audio.start()
-                except Exception as exc:
-                    self.audio = None
-                    # Video can still run on machines without an audio output device.
-                    self.error = 'Audio indisponivel: ' + str(exc)
-            for packet in container.demux([s for s in (video, audio) if s is not None]):
+            stage = 'pyav_open'
+            container = av.open(source, mode='r')
+            stage = 'stream_selection'
+            video = next(iter(container.streams.video), None)
+            audio = next(iter(container.streams.audio), None)
+            if video is None or audio is None:
+                raise RuntimeError('Audio/video stream required')
+            resampler = av.AudioResampler(format='fltp', layout='stereo', rate=RATE)
+            stage = "audio_output"
+            self.audio = sd.OutputStream(samplerate=RATE, channels=2, dtype='float32', blocksize=960, callback=self._callback)
+            LOG.info('capture_started delay=%d', self.delay)
+            stage = "demux_decode"
+            self.fps = min(120., max(1., float(video.average_rate or 30)))
+            self._decoder = threading.Thread(target=decode_video, args=(self,video), daemon=True)
+            self._decoder.start()
+            self.audio.start()
+            LOG.info("video_source width=%s height=%s fps=%.3f quality=%s", video.codec_context.width, video.codec_context.height, self.fps, quality)
+            for packet in container.demux(video, audio):
                 if self.stop_flag.is_set():
                     break
-                while self.paused and not self.stop_flag.wait(0.05):
-                    pass
-                decode_start=time.perf_counter()
-                decoded=packet.decode()
-                MONITOR.duration('video.packet_decode',(time.perf_counter()-decode_start)*1000)
-                for frame in decoded:
-                    if self.stop_flag.is_set():
-                        break
-                    if isinstance(frame, av.VideoFrame):
-                        pts = float(frame.time) if frame.time is not None else None
-                        if self._clock_start is None:
-                            self._clock_start = time.monotonic() - (pts or 0)
-                        if pts is not None:
-                            deadline = self._clock_start + pts
-                            lag = time.monotonic() - deadline
-                            if lag > 0.35:
-                                MONITOR.increment('video.frames_dropped_late')
-                                continue  # Drop stale frames rather than accumulating lag.
-                            if lag < -0.01:
-                                self.stop_flag.wait(min(-lag, 0.12))
-                        # Keep demux/decode running for audio sync, but avoid RGB conversion
-                        # for video frames that the 30-FPS UI cannot display.
-                        now = time.monotonic()
-                        interval = 1.0 / self.target_video_fps
-                        if pts is not None:
-                            if self._last_video_pts is not None and pts >= self._last_video_pts and pts - self._last_video_pts < interval * 0.95:
-                                MONITOR.increment('video.frames_skipped_before_rgb')
-                                continue
-                            self._last_video_pts = pts
-                        else:
-                            if self._last_video_wall is not None and now - self._last_video_wall < interval * 0.95:
-                                MONITOR.increment('video.frames_skipped_before_rgb')
-                                continue
-                            self._last_video_wall = now
-                        convert_start=time.perf_counter()
-                        rgb = frame.to_ndarray(format='rgb24')
-                        MONITOR.duration('video.rgb_conversion',(time.perf_counter()-convert_start)*1000)
-                        item = (rgb.tobytes(), (frame.width, frame.height))
-                        MONITOR.increment('video.frames_rgb_converted')
-                        if self.frames.full():
-                            MONITOR.increment('video.frames_dropped_queue')
-                            try: self.frames.get_nowait()
-                            except Empty: pass
-                        self.frames.put_nowait(item)
-                    elif isinstance(frame, av.AudioFrame) and resampler and self.audio:
-                        for converted in resampler.resample(frame):
-                            samples = converted.to_ndarray()
-                            # planar stereo (2, N) or packed (1, 2*N)
-                            if samples.ndim == 2 and samples.shape[0] == 2:
-                                samples = samples.T
-                            else:
-                                samples = samples.reshape(-1, 2)
-                            self._enqueue_audio(np.ascontiguousarray(samples, dtype=np.float32))
-                            MONITOR.increment('audio.chunks_queued')
-            if not self.stop_flag.is_set() and self.error is None:
-                self.error = 'Transmissao encerrada'
+                if packet.stream.index == video.index:
+                    if packet.pts is None or not packet.size:
+                        continue
+                    stamp = float(packet.pts * packet.time_base)
+                    if self._origin is None:
+                        self._origin = stamp
+                    pts = max(0., stamp-self._origin)
+                    with self.lock:
+                        if self.packets.append(packet, pts):
+                            self.video_latest = self.packets.edge
+                            MONITOR.increment('video.compressed_bytes', packet.size)
+                    continue
+                for frame in packet.decode():
+                    pts = self._time(frame)
+                    if pts is None:
+                        continue
+                    for converted in resampler.resample(frame):
+                        t = self._time(converted)
+                        self._store_audio(converted.to_ndarray().T, pts if t is None else t)
+            self._capture_done = True
+            code = self.capture.returncode()
+            if code not in (None, 0) and not self.stop_flag.is_set():
+                raise RuntimeError("Streamlink exited unsuccessfully")
+            self._ended = True
+            while not self.stop_flag.wait(.1):
+                if min(self.latest, self.video_latest) < 0 or (self.position is not None and self.position >= min(self.latest,self.video_latest)):
+                    break
         except Exception as exc:
-            self.error = str(exc)
+            if not self.stop_flag.is_set():
+                self.error = f'Capture failed: {stage} ({type(exc).__name__})'
+                trace = ' > '.join(f'{f.filename.rsplit("/", 1)[-1]}:{f.lineno}:{f.name}' for f in traceback.extract_tb(exc.__traceback__))
+                LOG.error('capture_failed stage=%s type=%s errno=%s streamlink_exit=%s trace=%s', stage, type(exc).__name__, getattr(exc, 'errno', None), self.capture.returncode(), trace)
         finally:
-            if container is not None:
-                container.close()
-            if self.audio is not None:
-                try: self.audio.stop(); self.audio.close()
-                except Exception: pass
-                self.audio = None
+            self._ended = True
+            self.stop_flag.set()
+            self.capture.terminate()
+            if self._decoder is not None:
+                self._decoder.join()
+            try:
+                if container is not None:
+                    container.close()
+            finally:
+                self.capture.close()
+                if self.audio is not None:
+                    try:
+                        self.audio.stop()
+                    finally:
+                        self.audio.close()
+                        self.audio = None
+                LOG.info("capture_ended")
 
     def poll(self):
-        item = None
-        while True:
-            try:
-                newer = self.frames.get_nowait()
-                if item is not None:
-                    MONITOR.increment('video.frames_skipped_ui_poll')
-                item = newer
-            except Empty: break
-        return item
+        with self.lock:
+            if self.position is None:
+                return None
+            item = None
+            for _ in range(12):
+                if not self.frames or self.frames[0][0] > self.position + .015:
+                    break
+                _, item = self.frames.popleft()
+            return item
 
     def toggle_pause(self):
-        self.paused = not self.paused
-        # Resume on a fresh clock: avoid dropping every frame after a pause.
-        if not self.paused:
-            self._clock_start = None
-        self._last_video_pts = None
-        self._last_video_wall = None
+        with self.lock:
+            self.paused = not self.paused
+            self._wall = time.monotonic()
 
     def set_volume(self, volume):
-        self.volume = max(0.0, min(1.0, float(volume)))
+        self.volume = max(0., min(1., float(volume)))
 
     def close(self):
         self.stop_flag.set()
+        self.capture.terminate()
         if self.worker and self.worker.is_alive():
-            self.worker.join(timeout=3.0)
-        stopped = not (self.worker and self.worker.is_alive())
-        if stopped:
-            self.worker = None
-        with self._audio_lock:
-            self._audio_chunks.clear()
-            self._audio_offset = 0
-            self._audio_samples = 0
-        self.frames = Queue(maxsize=2)
-        self.latest = None
-        self._clock_start = None
-        return stopped
+            self.worker.join(timeout=.1)
+        return not (self.worker and self.worker.is_alive())

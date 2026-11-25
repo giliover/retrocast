@@ -51,3 +51,13 @@ def suggest(value: str, history=()) -> list[Suggestion]:
             if low.startswith(base.lower()) and len(q)>len(base):
                 add(label,q,'URL digitada')
     return result
+
+
+def validate_source(url):
+    parsed = urlparse(url)
+    if (len(url) > 2048 or any(ord(c) < 32 for c in url) or
+        parsed.scheme != 'https' or parsed.username or parsed.password or
+        parsed.hostname not in {'twitch.tv','www.twitch.tv','youtube.com','www.youtube.com','m.youtube.com','youtu.be'} or
+        parsed.port not in (None,443)):
+        raise ValueError('Use a public HTTPS Twitch or YouTube URL')
+    return url
