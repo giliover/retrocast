@@ -33,6 +33,8 @@ class Session:
         self._cue_received = self._cue_late = self._cue_evicted = 0
         self._last_cue_end = None
         self._caption_hits = self._caption_misses = 0
+        self._waiting_since = None
+        self._last_bypassed = 0
 
     def start(self):
         if not self.config.url.strip():
@@ -51,7 +53,7 @@ class Session:
         self.caption = ""
         self.status = 'CONECTANDO...'
         self.running = True
-        self.video.start(self.config.url, self.config.quality, self.config.delay)
+        self.video.start(self.config.url, self.config.quality, self.config.delay, priority=self.config.priority, fps_limit=self.config.fps_limit)
         LOG.info("session_started delay=%d", self.config.delay)
         self.thread = Thread(target=transcribe, args=(replace(self.config), self.video, self.events, self.stop), daemon=True)
         self.thread.start()
@@ -75,12 +77,23 @@ class Session:
                     if len(self.cues) > 1400:
                         self.cues.pop(next(iter(self.cues)))
                         self._cue_evicted += 1
+            elif event.kind == "transcription_complete":
+                self.video.acknowledge_transcription(*event.value)
             elif event.kind == 'line':
                 self.lines.append(event.value)
                 changed = True
             else:
                 self.status = ('ERRO: ' if event.kind == 'error' else '') + event.value
         pos = self.video.position if self.running else None
+        if self.running and self.video.whisper_waiting and self._waiting_since is None:
+            self._waiting_since = time.monotonic()
+            LOG.info('whisper_wait_started playback=%s completed_end=%s queue=%d', pos, self.video.ai_last_completed, self.video.jobs.qsize())
+            MONITOR.increment('ai.wait_started')
+        elif self._waiting_since is not None and (not self.running or not self.video.whisper_waiting):
+            elapsed = time.monotonic() - self._waiting_since
+            LOG.info('whisper_wait_ended playback=%s seconds=%.3f', pos, elapsed)
+            MONITOR.duration('ai.playback_wait', elapsed * 1000)
+            self._waiting_since = None
         caption = self.cues.get(int(pos*10), '') if pos is not None else ''
         if pos is not None:
             if caption:
@@ -92,7 +105,9 @@ class Session:
             v = self.video
             oldest = next(iter(self.cues), None)
             newest = next(reversed(self.cues), None)
-            LOG.info('subtitle_sync playback=%s audio_edge=%.3f video_edge=%.3f delay=%d jobs=%d active_pts=%s enqueued_end=%s completed_end=%s cue_end=%s cue_oldest_slot=%s cue_newest_slot=%s slots=%d events=%d received_total=%d late_total=%d evicted_slots_total=%d dropped_jobs_total=%d discontinuities=%d hits=%d misses=%d paused=%s', pos, v.latest, v.video_latest, v.delay, v.jobs.qsize(), v.ai_active, v.ai_last_enqueued, v.ai_last_completed, self._last_cue_end, oldest, newest, len(self.cues), self.events.qsize(), self._cue_received, self._cue_late, self._cue_evicted, v.ai_dropped, v.audio_discontinuities, self._caption_hits, self._caption_misses, v.paused)
+            LOG.info('subtitle_sync playback=%s audio_edge=%.3f video_edge=%.3f delay=%d jobs=%d active_pts=%s enqueued_end=%s completed_end=%s cue_end=%s cue_oldest_slot=%s cue_newest_slot=%s slots=%d events=%d received_total=%d late_total=%d evicted_slots_total=%d dropped_jobs_total=%d discontinuities=%d hits=%d misses=%d paused=%s priority=%s fps_limit=%s source_fps=%.2f effective_fps=%.2f bypassed_callbacks=%d', pos, v.latest, v.video_latest, v.delay, v.jobs.qsize(), v.ai_active, v.ai_last_enqueued, v.ai_last_completed, self._last_cue_end, oldest, newest, len(self.cues), self.events.qsize(), self._cue_received, self._cue_late, self._cue_evicted, v.ai_dropped, v.audio_discontinuities, self._caption_hits, self._caption_misses, v.paused, v.priority, v.fps_limit or "auto", v.fps, v.presentation_fps, v.ai_bypassed_callbacks)
+            MONITOR.increment('ai.bypassed_callbacks', v.ai_bypassed_callbacks-self._last_bypassed)
+            self._last_bypassed = v.ai_bypassed_callbacks
             MONITOR.increment('caption.lookup_hits', self._caption_hits)
             MONITOR.increment('caption.lookup_misses', self._caption_misses)
             self._caption_hits = self._caption_misses = 0
@@ -103,7 +118,9 @@ class Session:
             self.running = False
             self.caption = ""
             self.status = "ENDED"
-        if self.running and pos is None and not self.video.error and not self.status.startswith("ERRO:"):
+        if self.running and self.video.whisper_waiting and not self.video.error:
+            self.status = "WAITING FOR WHISPER..."
+        elif self.running and pos is None and not self.video.error and not self.status.startswith("ERRO:"):
             self.status = f'BUFFER: {max(0,self.video.latest):.0f}/{self.config.delay}s'
         elif self.running and not self.video.error and not self.status.startswith("ERRO:"):
             self.status = f'PLAYING | BUFFER {max(0,self.video.latest-(pos or 0)):.0f}s'

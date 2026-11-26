@@ -72,8 +72,8 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin):
         self.draw()
         hover=None
         while self.running:
-            # Block when idle; active video is sampled at up to 30 Hz.
-            timeout=max(1, int(1000/self.session.video.fps)) if self.session.running else 1000
+            # Block when idle; active video is sampled at the selected FPS cap.
+            timeout=max(1, int(1000/self.session.video.presentation_fps)) if self.session.running else 1000
             first=pygame.event.wait(timeout) if timeout else pygame.event.wait()
             events=[first]
             for _ in range(63):
@@ -220,7 +220,7 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin):
                         MONITOR.increment('ui.full_draws')
                 MONITOR.increment('ui.frames')
             if self.session.running:
-                self.clock.tick(max(1, round(self.session.video.fps)))
+                self.clock.tick(max(1, round(self.session.video.presentation_fps)))
             MONITOR.duration('ui.frame_total', (time.perf_counter()-frame_started)*1000)
             MONITOR.duration('ui.actual_fps', self.clock.get_fps())
             report=MONITOR.report_if_due()

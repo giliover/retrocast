@@ -19,7 +19,7 @@ class CoreTests(unittest.TestCase):
         p=Paginator(page=9,page_size=10)
         self.assertEqual(p.view(r),list(range(90,100)))
     def test_defaults(self):
-        c=Config();self.assertEqual(c.delay,40);self.assertEqual(c.language,'auto');self.assertFalse(c.autosave)
+        c=Config();self.assertEqual(c.delay,15);self.assertEqual(c.language,'auto');self.assertFalse(c.autosave)
     def test_sources(self):
         self.assertEqual(validate_source('https://www.twitch.tv/test'),'https://www.twitch.tv/test')
         for url in ['http://twitch.tv/test','https://127.0.0.1','https://twitch.tv.evil.test','https://user@twitch.tv/test','https://twitch.tv:22/test']:

@@ -7,7 +7,7 @@ from retro_live.storage import read_json, write_json
 
 class PlaybackTests(unittest.TestCase):
     def test_default_delay_and_refill(self):
-        p=VideoPlayer(); p.latest=p.video_latest=39
+        p=VideoPlayer(); self.assertEqual(p.delay,15); p.set_delay(40); p.latest=p.video_latest=39
         out=np.ones((960,2),dtype=np.float32)
         p._callback(out,960,None,None)
         self.assertIsNone(p.position); self.assertFalse(out.any())
@@ -34,7 +34,7 @@ class PlaybackTests(unittest.TestCase):
         p.toggle_pause(); p._callback(out,960,None,None)
         self.assertEqual(p.position,start); self.assertFalse(out.any())
     def test_refill_waits_for_new_data(self):
-        p=VideoPlayer();p.latest=p.video_latest=40;p._play_sample=40*RATE
+        p=VideoPlayer();p.set_delay(40);p.latest=p.video_latest=40;p._play_sample=40*RATE
         out=np.ones((960,2),dtype=np.float32)
         p._callback(out,960,None,None);self.assertIsNone(p.position)
         p._callback(out,960,None,None);self.assertIsNone(p.position)

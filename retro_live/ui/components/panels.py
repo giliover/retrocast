@@ -32,14 +32,22 @@ class PanelsMixin:
         self.txt(f'BUFFER {self.session.config.delay}s',255,128,self.palette.accent,self.small)
         self.button('delay_up','+ 5s',(365,121,75,29))
         self.button('quality','VIDEO: '+self.session.config.quality.upper(),(455,121,180,29))
+        # Dedicated responsive row for priority and FPS, independent of video size.
+        control_width=max(1,(w-52)//2)
+        self.button('priority',self.tr('priority')+': '+self.tr(self.session.config.priority), (20,155,control_width,29))
+        fps_label=str(self.session.config.fps_limit or 'AUTO')
+        fx=32+control_width
+        self.button('fps_down','−',(fx,155,40,29))
+        self.button('fps','FPS: '+fps_label,(fx+46,155,max(1,control_width-92),29))
+        self.button('fps_up','+',(fx+control_width-40,155,40,29))
         video_w=max(320,int((w-58)*0.64)); right_x=video_w+38; right_w=w-right_x-20
-        video=pygame.Rect(20,158,video_w,max(220,h-305))
+        video=pygame.Rect(20,192,video_w,max(220,h-339))
         self.video_rect=video
         self.draw_video_region(video)
-        self.rect((right_x,158,right_w,video.height))
-        self.txt(self.tr('transcript').upper(),right_x+14,172,self.palette.accent,self.small,maxwidth=right_w-165)
-        pygame.draw.line(self.screen,self.palette.edge,(right_x+12,201),(right_x+right_w-12,201))
-        transcript_area=pygame.Rect(right_x+12,213,right_w-24,video.height-85)
+        self.rect((right_x,192,right_w,video.height))
+        self.txt(self.tr('transcript').upper(),right_x+14,206,self.palette.accent,self.small,maxwidth=right_w-165)
+        pygame.draw.line(self.screen,self.palette.edge,(right_x+12,235),(right_x+right_w-12,235))
+        transcript_area=pygame.Rect(right_x+12,247,right_w-24,video.height-85)
         previous=self.screen.get_clip(); self.screen.set_clip(transcript_area)
         key=(right_w, self._transcript_revision)
         if key != self._rows_key:
@@ -52,9 +60,9 @@ class PanelsMixin:
         for i,line in enumerate(self.transcript_page.view(rows)):
             self.txt(line,transcript_area.x,transcript_area.y+i*20,self.palette.text,self.small,maxwidth=transcript_area.width)
         self.screen.set_clip(previous)
-        self.button('trans_prev','<', (right_x+right_w-135,166,26,27))
-        self.txt(self.transcript_page.label(len(rows)),right_x+right_w-102,172,self.palette.accent,self.small)
-        self.button('trans_next','>', (right_x+right_w-40,166,26,27))
+        self.button('trans_prev','<', (right_x+right_w-135,200,26,27))
+        self.txt(self.transcript_page.label(len(rows)),right_x+right_w-102,206,self.palette.accent,self.small)
+        self.button('trans_next','>', (right_x+right_w-40,200,26,27))
         # Two dedicated rows, with consistent 12px spacing; no overlapping buttons.
         bottom=video.bottom+10
         self.rect((20,bottom,w-40,91))

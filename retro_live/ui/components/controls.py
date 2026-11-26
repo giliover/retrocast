@@ -1,3 +1,4 @@
+from ...playback_policy import PRIORITIES, FPS_CHOICES
 from ...sources import suggest, normalize_source, validate_source
 from ...themes import get_theme, next_theme
 from ...i18n import next_language
@@ -20,6 +21,21 @@ class ControlsMixin:
                 self.frame=None
                 self._scaled_frame=None
                 self._scaled_frame_key=None
+            elif name=='priority':
+                config = self.session.config
+                config.priority = PRIORITIES[(PRIORITIES.index(config.priority)+1)%len(PRIORITIES)]
+                self.session.video.set_priority(config.priority)
+            elif name in ('fps','fps_down','fps_up'):
+                config = self.session.config
+                index = FPS_CHOICES.index(config.fps_limit)
+                if name == "fps":
+                    index = 0 if index else FPS_CHOICES.index(30)
+                elif name == "fps_down":
+                    index = max(1, sum(fps < self.session.video.fps for fps in FPS_CHOICES)-1) if index == 0 else max(1,index-1)
+                else:
+                    index = FPS_CHOICES.index(60) if index == 0 else min(len(FPS_CHOICES)-1,index+1)
+                config.fps_limit = FPS_CHOICES[index]
+                self.session.video.set_fps_limit(config.fps_limit)
             elif name=='quality':
                 qualities=('auto','1080p','720p','480p','360p')
                 current=self.session.config.quality

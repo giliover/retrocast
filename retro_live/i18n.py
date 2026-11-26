@@ -9,3 +9,7 @@ def translate(language: str, key: str) -> str:
     return MESSAGES.get(language, MESSAGES["en"]).get(key,key)
 def next_language(language: str) -> str:
     return LANGUAGES[(LANGUAGES.index(language)+1)%len(LANGUAGES)] if language in LANGUAGES else LANGUAGES[0]
+
+MESSAGES["pt"].update(priority="PRIORIDADE", balanced="BALANCEADO", video="VÍDEO", subtitle="LEGENDA")
+MESSAGES["en"].update(priority="PRIORITY", balanced="BALANCED", video="VIDEO", subtitle="SUBTITLE")
+MESSAGES["es"].update(priority="PRIORIDAD", balanced="EQUILIBRADO", video="VÍDEO", subtitle="SUBTÍTULO")

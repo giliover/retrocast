@@ -2,6 +2,7 @@
 import logging
 import time
 from .performance import MONITOR
+from .playback_policy import FrameLimiter
 
 LOG = logging.getLogger('retrocast.application')
 
@@ -10,6 +11,7 @@ def decode_video(player, stream):
     generation = -1
     cursor = None
     context = stream.codec_context
+    limiter = FrameLimiter()
     try:
         while not player.stop_flag.is_set():
             with player.lock:
@@ -26,6 +28,8 @@ def decode_video(player, stream):
                     context_reset = True
                 entry = None
                 if cursor is not None and cursor < player.packets.first:
+                    if player.require_transcription:
+                        raise RuntimeError('Unplayed video exceeded buffer capacity')
                     cursor = None
                     player._play_sample = None
                     player.position = None
@@ -37,6 +41,7 @@ def decode_video(player, stream):
                 eof = player._capture_done and cursor is not None and cursor >= player.packets.next
             if context_reset:
                 context.flush_buffers()
+                limiter.reset()
             if entry is None and not eof:
                 player.stop_flag.wait(.005)
                 continue
@@ -55,6 +60,14 @@ def decode_video(player, stream):
                     continue
                 if frame.width*frame.height > 4096*2160:
                     raise ValueError('Video resolution exceeds safety limit')
+                with player.lock:
+                    limit = player.fps_limit
+                if not limiter.allows(pts, limit):
+                    with player.lock:
+                        if generation == player._video_generation:
+                            player._video_ready = max(player._video_ready, pts)
+                    MONITOR.increment('video.frames_fps_skipped')
+                    continue
                 rgb = frame.to_ndarray(format='rgb24')
                 item = (rgb.tobytes(), (frame.width, frame.height))
                 with player.lock:

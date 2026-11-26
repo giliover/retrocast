@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 from pathlib import Path
+from .playback_policy import DEFAULT_DELAY
 
 @dataclass
 class Config:
@@ -7,7 +8,9 @@ class Config:
     quality: str = 'auto'
     model: str = 'base'
     language: str = 'auto'
-    delay: int = 40
+    delay: int = DEFAULT_DELAY
+    priority: str = "balanced"
+    fps_limit: int = 0
     chunk: float = 5.0
     device: str = 'auto'
     compute_type: str = 'default'

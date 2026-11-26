@@ -4,7 +4,7 @@ import threading
 import time
 import traceback
 from .capture import StreamCapture
-from queue import Queue, Full
+from .playback_policy import DEFAULT_DELAY, PRIORITIES, FPS_CHOICES, LatestAudioQueue, WaitPolicy, effective_fps
 from collections import deque
 from .packet_buffer import PacketBuffer
 from .video_decoder import decode_video
@@ -24,7 +24,7 @@ class VideoPlayer:
         self.error = None
         self.paused = False
         self.volume = .8
-        self.delay = 40
+        self.delay = DEFAULT_DELAY
         self.audio = None
         self.lock = threading.Lock()
         self.frames = deque(maxlen=12)
@@ -35,8 +35,13 @@ class VideoPlayer:
         self._decoder = None
         self._capture_done = False
         self.fps = 30.0
+        self.fps_limit = 0
+        self.priority = "video"
+        self._wait_policy = WaitPolicy()
+        self.ai_bypassed_callbacks = 0
+        self._skipped_blocks = set()
         self.sound = {}
-        self.jobs = Queue(maxsize=30)
+        self.jobs = LatestAudioQueue(maxsize=8)
         self.latest = -1.0
         self.position = None
         self._last_frame = None
@@ -56,15 +61,60 @@ class VideoPlayer:
         self.ai_last_completed = None
         self.ai_active = None
         self.ai_dropped = 0
+        self.require_transcription = False
+        self.whisper_waiting = False
+        self._transcribed_blocks = set()
         self.audio_discontinuities = 0
 
-    def start(self, url, quality='auto', delay=40):
+    def start(self, url, quality='auto', delay=DEFAULT_DELAY, require_transcription=None, priority=None, fps_limit=0):
         if not self.close():
             raise RuntimeError('Previous player still stopping')
         self.__init__()
         self.delay = delay
+        self.set_priority(priority or ("balanced" if require_transcription is None else ("subtitle" if require_transcription else "video")))
+        self.set_fps_limit(fps_limit)
         self.worker = threading.Thread(target=self._run, args=(url, quality), daemon=True)
         self.worker.start()
+
+    @property
+    def presentation_fps(self):
+        return effective_fps(self.fps, self.fps_limit)
+
+    def set_priority(self, priority):
+        if priority not in PRIORITIES:
+            raise ValueError('Invalid playback priority')
+        with self.lock:
+            self.priority = priority
+            self.require_transcription = priority == 'subtitle'
+            self._wait_policy.reset()
+            self.whisper_waiting = False
+        LOG.info('playback_priority mode=%s', priority)
+
+    def set_fps_limit(self, limit):
+        if type(limit) is not int or limit not in FPS_CHOICES:
+            raise ValueError('Invalid FPS limit')
+        with self.lock:
+            self.fps_limit = limit
+        LOG.info('video_fps_limit limit=%s effective=%.2f', limit or 'auto', self.presentation_fps)
+
+    def _enqueue_audio(self, job):
+        full, dropped = self.jobs.offer(job)
+        self.ai_last_enqueued = job[0] + len(job[1])/16000
+        MONITOR.increment('ai.jobs_enqueued')
+        if full:
+            self.ai_dropped += 1
+            if dropped is not None:
+                start, audio = dropped
+                first = round(start * RATE / BLOCK)
+                last = first + round(len(audio) / 1600)
+                with self.lock:
+                    for index in range(first, last):
+                        if index in self.sound:
+                            self._skipped_blocks.add(index)
+                LOG.warning('ai_queue_full policy=drop_oldest dropped_pts=%.2f newest_pts=%.2f dropped_total=%d depth=%d', start, job[0], self.ai_dropped, self.jobs.qsize())
+            else:
+                LOG.warning('ai_queue_full policy=drop_oldest dropped_total=%d', self.ai_dropped)
+            MONITOR.increment('ai.jobs_dropped')
 
     def set_delay(self, seconds):
         with self.lock:
@@ -74,6 +124,8 @@ class VideoPlayer:
             self._play_sample = None
             self._wall = None
             self._resume_edge = None
+            self.whisper_waiting = False
+            self._wait_policy.reset()
             self._reset_video()
 
     def _reset_video(self):
@@ -89,6 +141,29 @@ class VideoPlayer:
         if self._origin is None:
             self._origin = pts
         return max(0.0, pts - self._origin)
+
+    def acknowledge_transcription(self, start, end):
+        """Called only after the UI has consumed all cues for this audio job."""
+        first = round(start * RATE / BLOCK)
+        last = round(end * RATE / BLOCK)
+        if not 0 <= last - first <= 50:
+            raise ValueError('Invalid transcription interval')
+        with self.lock:
+            for index in range(first, last):
+                if index in self.sound:
+                    self._transcribed_blocks.add(index)
+
+    def fail_transcription(self, reason):
+        self.error = 'Whisper: ' + reason
+        self.stop_flag.set()
+        self.capture.terminate()
+
+    def _transcription_ready(self, sample, count):
+        if count <= 0:
+            return True
+        first = sample // BLOCK
+        last = (sample + count - 1) // BLOCK
+        return all(i in self._transcribed_blocks or i in self._skipped_blocks for i in range(first, last + 1))
 
     def _callback(self, outdata, frames, time_info, status):
         outdata.fill(0)
@@ -117,13 +192,20 @@ class VideoPlayer:
                     if self._video_ready < target:
                         return
                 self._play_sample = int(target*RATE)
-            if edge - self._play_sample/RATE > 125:
+            if edge - self._play_sample/RATE > (129 if self.require_transcription else 125):
+                if self.require_transcription and edge - self._play_sample/RATE > 129:
+                    self.error = 'Playback buffer exhausted while waiting for Whisper'
+                    self.stop_flag.set()
+                    return
                 self._play_sample = None
                 self.position = None
                 self._reset_video()
                 self._last_frame = None
                 return
             if not self._ended and self._play_sample + frames > int(edge*RATE):
+                # In strict mode keep the exact cursor rather than seeking.
+                if self.require_transcription:
+                    return
                 # Refill instead of advancing across an unavailable interval.
                 self._play_sample = None
                 self.position = None
@@ -138,10 +220,19 @@ class VideoPlayer:
                     return
             if self._ended and sample >= int(edge*RATE):
                 self.position = edge
+                self.whisper_waiting = False
                 return
+            limit = min(frames, max(0, int(edge*RATE)-sample)) if self._ended else frames
+            mode = 'subtitle' if self.require_transcription else self.priority
+            ready = self._transcription_ready(sample, limit)
+            if not self._wait_policy.allows(mode, ready, time.monotonic()):
+                self.whisper_waiting = True
+                return
+            if not ready or sample // BLOCK in self._skipped_blocks:
+                self.ai_bypassed_callbacks += 1
+            self.whisper_waiting = False
             self.position = sample / RATE
             written = 0
-            limit = min(frames, max(0, int(edge*RATE)-sample)) if self._ended else frames
             while written < limit:
                 index, offset = divmod(sample, BLOCK)
                 take = min(limit - written, BLOCK - offset)
@@ -158,6 +249,9 @@ class VideoPlayer:
         actual = int(round(pts * RATE))
         if abs(actual - expected) > RATE // 2:
             self.audio_discontinuities += 1
+            if self.require_transcription:
+                self.fail_transcription("audio timestamp discontinuity")
+                return
             LOG.warning("audio_pts_discontinuity expected=%.3f actual=%.3f discarded_blocks=%d", expected/RATE, actual/RATE, len(self._pcm))
             self._pending = np.empty((0, 2), dtype=np.float32)
             self._pcm.clear()
@@ -170,9 +264,14 @@ class VideoPlayer:
             with self.lock:
                 self.sound[index] = block
                 self.sound.pop(index - 1300, None)
+                self._transcribed_blocks.discard(index - 1300)
+                self._skipped_blocks.discard(index - 1300)
                 # Bound storage even after timestamp discontinuities.
                 if len(self.sound) > 1300:
-                    self.sound.pop(next(iter(self.sound)))
+                    oldest = next(iter(self.sound))
+                    self.sound.pop(oldest)
+                    self._transcribed_blocks.discard(oldest)
+                    self._skipped_blocks.discard(oldest)
                 self.latest = max(self.latest, (index + 1) * .1)
             if not self._pcm:
                 self._pcm_start = index * .1
@@ -180,15 +279,7 @@ class VideoPlayer:
             if len(self._pcm) == 50:
                 job = (self._pcm_start, np.concatenate(self._pcm))
                 self._pcm.clear()
-                try:
-                    self.jobs.put_nowait(job)
-                    self.ai_last_enqueued = job[0] + len(job[1])/16000
-                    MONITOR.increment("ai.jobs_enqueued")
-                except Full:
-                    self.ai_dropped += 1
-                    if self.ai_dropped == 1 or self.ai_dropped % 10 == 0:
-                        LOG.warning("ai_queue_full pts=%.2f dropped_total=%d depth=%d", job[0], self.ai_dropped, self.jobs.qsize())
-                    MONITOR.increment('ai.jobs_dropped')
+                self._enqueue_audio(job)
             self._audio_next += BLOCK
 
     def _run(self, url, quality):
@@ -221,6 +312,16 @@ class VideoPlayer:
             for packet in container.demux(video, audio):
                 if self.stop_flag.is_set():
                     break
+                # Bound the lead while Whisper is slow. Do not discard unplayed media.
+                while self.require_transcription and not self.stop_flag.is_set():
+                    with self.lock:
+                        cursor = self._play_sample / RATE if self._play_sample is not None else (self._video_target or 0.)
+                        ahead = max(self.latest, self.video_latest) - cursor
+                    if ahead < max(110, self.delay + 5):
+                        break
+                    self.stop_flag.wait(.05)
+                if self.stop_flag.is_set():
+                    break
                 if packet.stream.index == video.index:
                     if packet.pts is None or not packet.size:
                         continue
@@ -240,6 +341,10 @@ class VideoPlayer:
                     for converted in resampler.resample(frame):
                         t = self._time(converted)
                         self._store_audio(converted.to_ndarray().T, pts if t is None else t)
+            if self._pcm and not self.stop_flag.is_set():
+                job = (self._pcm_start, np.concatenate(self._pcm))
+                self._pcm.clear()
+                self._enqueue_audio(job)
             self._capture_done = True
             code = self.capture.returncode()
             if code not in (None, 0) and not self.stop_flag.is_set():
@@ -286,6 +391,7 @@ class VideoPlayer:
     def toggle_pause(self):
         with self.lock:
             self.paused = not self.paused
+            self._wait_policy.reset()
             self._wall = time.monotonic()
 
     def set_volume(self, volume):
