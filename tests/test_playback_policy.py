@@ -36,11 +36,12 @@ class PolicyTests(unittest.TestCase):
         p, out = self.player('balanced')
         with patch('retro_live.player.time.monotonic', return_value=10):
             p._callback(out, 960, None, None)
-        self.assertTrue(p.whisper_waiting)
+        self.assertFalse(p.whisper_waiting)
+        self.assertEqual(p._play_sample, 960)
         with patch('retro_live.player.time.monotonic', return_value=12):
             p._callback(out, 960, None, None)
         self.assertFalse(p.whisper_waiting)
-        self.assertEqual(p._play_sample, 960)
+        self.assertEqual(p._play_sample, 1920)
         p.acknowledge_transcription(0, .1)
         p._callback(out, 960, None, None)
         self.assertIsNone(p._wait_policy.since)

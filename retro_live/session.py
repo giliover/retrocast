@@ -9,9 +9,10 @@ from .sources import validate_source
 LOG = logging.getLogger("retrocast.application")
 from threading import Event, Thread
 from .config import Config
+from .whisper_policy import WhisperPolicy
 from .processes import ProcessManager
 from .transcriber import transcribe
-from .player import VideoPlayer
+from .player import VideoPlayer, RATE
 
 class Session:
     def __init__(self):
@@ -56,7 +57,7 @@ class Session:
         self.caption = ""
         self.status = 'CONECTANDO...'
         self.running = True
-        self.video.start(self.config.url, self.config.quality, self.config.delay, priority=self.config.priority, fps_limit=self.config.fps_limit, subtitles_enabled=self.subtitles_enabled)
+        self.video.start(self.config.url, self.config.quality, self.config.delay, priority=self.config.priority, fps_limit=self.config.fps_limit, subtitles_enabled=self.subtitles_enabled, whisper_policy=WhisperPolicy(self.config.whisper_retries, self.config.whisper_timeout))
         LOG.info("session_started delay=%d", self.config.delay)
         if self.subtitles_enabled:
             self._start_whisper()
@@ -105,6 +106,9 @@ class Session:
                     if len(self.cues) > 1400:
                         self.cues.pop(next(iter(self.cues)))
                         self._cue_evicted += 1
+            elif event.kind == "transcription_discarded":
+                self.video.discard_transcription(*event.value)
+                self.video.ai_expired += 1
             elif event.kind == "transcription_complete":
                 self.video.acknowledge_transcription(*event.value)
             elif event.kind == 'line':
@@ -134,6 +138,9 @@ class Session:
             oldest = next(iter(self.cues), None)
             newest = next(reversed(self.cues), None)
             LOG.info('subtitle_sync playback=%s audio_edge=%.3f video_edge=%.3f delay=%d jobs=%d active_pts=%s enqueued_end=%s completed_end=%s cue_end=%s cue_oldest_slot=%s cue_newest_slot=%s slots=%d events=%d received_total=%d late_total=%d evicted_slots_total=%d dropped_jobs_total=%d discontinuities=%d hits=%d misses=%d paused=%s priority=%s fps_limit=%s source_fps=%.2f effective_fps=%.2f bypassed_callbacks=%d', pos, v.latest, v.video_latest, v.delay, v.jobs.qsize(), v.ai_active, v.ai_last_enqueued, v.ai_last_completed, self._last_cue_end, oldest, newest, len(self.cues), self.events.qsize(), self._cue_received, self._cue_late, self._cue_evicted, v.ai_dropped, v.audio_discontinuities, self._caption_hits, self._caption_misses, v.paused, v.priority, v.fps_limit or "auto", v.fps, v.presentation_fps, v.ai_bypassed_callbacks)
+            cursor = v._play_sample / RATE if v._play_sample is not None else None
+            lead = None if cursor is None or v.ai_last_completed is None else round(v.ai_last_completed-cursor, 3)
+            LOG.info('sync_metrics cursor=%s subtitle_lead=%s capture_av_delta=%.3f buffer_actual=%s waiting=%s attempt=%d expired=%d effective_retries=%d wait_timeout=%.1f video_pts=%s video_audio_delta=%s', cursor, lead, v.latest-v.video_latest, None if cursor is None else round(min(v.latest,v.video_latest)-cursor,3), v.whisper_waiting, v.ai_attempt, v.ai_expired, v.whisper_policy.effective(v.priority).retries, v.whisper_policy.playback_timeout(v.priority), v.presented_video_pts, None if cursor is None or v.presented_video_pts is None else round(v.presented_video_pts-cursor,3))
             MONITOR.increment('ai.bypassed_callbacks', v.ai_bypassed_callbacks-self._last_bypassed)
             self._last_bypassed = v.ai_bypassed_callbacks
             MONITOR.increment('caption.lookup_hits', self._caption_hits)

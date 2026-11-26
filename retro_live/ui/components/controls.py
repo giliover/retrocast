@@ -1,3 +1,4 @@
+from ...whisper_policy import WhisperPolicy, RETRIES, TIMEOUTS
 from ...playback_policy import PRIORITIES, FPS_CHOICES
 from ...sources import suggest, normalize_source, validate_source
 from ...themes import get_theme, next_theme
@@ -29,13 +30,22 @@ class ControlsMixin:
                 config = self.session.config
                 index = FPS_CHOICES.index(config.fps_limit)
                 if name == "fps":
-                    index = 0 if index else FPS_CHOICES.index(30)
+                    index = (index+1)%len(FPS_CHOICES)
                 elif name == "fps_down":
                     index = max(1, sum(fps < self.session.video.fps for fps in FPS_CHOICES)-1) if index == 0 else max(1,index-1)
                 else:
                     index = FPS_CHOICES.index(60) if index == 0 else min(len(FPS_CHOICES)-1,index+1)
                 config.fps_limit = FPS_CHOICES[index]
                 self.session.video.set_fps_limit(config.fps_limit)
+            elif name in ('whisper_retries','whisper_timeout','whisper_timeout_down','whisper_timeout_up'):
+                config = self.session.config
+                if config.priority != 'subtitle':
+                    return
+                if name == 'whisper_retries':
+                    config.whisper_retries = RETRIES[(RETRIES.index(config.whisper_retries)+1)%len(RETRIES)]
+                else:
+                    config.whisper_timeout = TIMEOUTS[max(0,min(len(TIMEOUTS)-1,TIMEOUTS.index(config.whisper_timeout)+(-1 if name == "whisper_timeout_down" else 1)))]
+                self.session.video.set_whisper_policy(WhisperPolicy(config.whisper_retries, config.whisper_timeout))
             elif name=='quality':
                 qualities=('auto','1080p','720p','480p','360p')
                 current=self.session.config.quality

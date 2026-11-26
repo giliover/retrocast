@@ -11,6 +11,8 @@ class Config:
     delay: int = DEFAULT_DELAY
     priority: str = "balanced"
     fps_limit: int = 0
+    whisper_retries: int = 1
+    whisper_timeout: float = .5
     chunk: float = 5.0
     device: str = 'auto'
     compute_type: str = 'default'

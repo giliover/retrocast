@@ -4,11 +4,22 @@ from queue import Queue
 DEFAULT_DELAY = 15
 PRIORITIES = ('balanced', 'video', 'subtitle')
 FPS_CHOICES = (0, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60)
-BALANCED_WAIT = 2.0
+BALANCED_WAIT = 0.0
 
 
 class LatestAudioQueue(Queue):
     """Atomic drop-oldest on overflow; retained jobs remain chronological."""
+    def newest(self, first):
+        """Keep only the newest pending job; bounded by queue capacity."""
+        dropped = []
+        with self.mutex:
+            while self._qsize():
+                dropped.append(first)
+                first = self._get()
+                self.unfinished_tasks -= 1
+            self.not_full.notify_all()
+        return first, dropped
+
     def offer(self, item):
         with self.not_full:
             dropped = None

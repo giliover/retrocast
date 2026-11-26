@@ -13,3 +13,7 @@ def next_language(language: str) -> str:
 MESSAGES["pt"].update(priority="PRIORIDADE", balanced="BALANCEADO", video="VÍDEO", subtitle="LEGENDA")
 MESSAGES["en"].update(priority="PRIORITY", balanced="BALANCED", video="VIDEO", subtitle="SUBTITLE")
 MESSAGES["es"].update(priority="PRIORIDAD", balanced="EQUILIBRADO", video="VÍDEO", subtitle="SUBTÍTULO")
+
+MESSAGES["pt"].update(resume="RETOMAR", retries="RETENT.", timeout="LIMITE", whisper_wait="AGUARDANDO WHISPER", attempt="TENTATIVA")
+MESSAGES["en"].update(resume="RESUME", retries="RETRIES", timeout="TIMEOUT", whisper_wait="WAITING FOR WHISPER", attempt="ATTEMPT")
+MESSAGES["es"].update(resume="CONTINUAR", retries="REINT.", timeout="LÍMITE", whisper_wait="ESPERANDO WHISPER", attempt="INTENTO")

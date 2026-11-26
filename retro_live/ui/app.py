@@ -21,8 +21,9 @@ from .components.primitives import PrimitivesMixin
 from .components.video import VideoMixin
 from .components.panels import PanelsMixin
 from .components.controls import ControlsMixin
+from .components.settings import SettingsMixin
 
-class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin):
+class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsMixin):
     def __init__(self):
         pygame.init()
         pygame.display.set_caption('RetroCast')
@@ -94,7 +95,6 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin):
                     self.running=False
                 elif event.type==pygame.MOUSEBUTTONDOWN:
                     if self.video_fullscreen:
-                        if event.button==1: self.action('fullscreen')
                         continue
                     if event.button==1:
                         selected=False
@@ -137,6 +137,9 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin):
                         if event.key==pygame.K_ESCAPE: self.action('fullscreen')
                         elif event.key==pygame.K_SPACE: self.action('pause')
                         elif event.key==pygame.K_c: self.action('sub')
+                        elif event.key==pygame.K_UP: self.action('vol_up')
+                        elif event.key==pygame.K_DOWN: self.action('vol_down')
+                        elif event.key==pygame.K_x: self.action('stop'); self.action('fullscreen')
                         continue
                     if self.history_open:
                         if event.key==pygame.K_ESCAPE: self.history_open=False
@@ -177,6 +180,9 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin):
                     elif event.key==pygame.K_ESCAPE: self.running=False
                     elif event.key==pygame.K_RETURN: self.action('play')
                     elif event.key==pygame.K_SPACE: self.action('pause')
+                    elif event.key==pygame.K_UP: self.action('vol_up')
+                    elif event.key==pygame.K_DOWN: self.action('vol_down')
+                    elif event.key==pygame.K_x: self.action('stop')
                     elif event.key==pygame.K_s: self.action('save')
                     elif event.key==pygame.K_m: self.action('model')
                     elif event.key==pygame.K_l: self.action('lang')
@@ -209,7 +215,11 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin):
                         self.frame=pygame.image.frombuffer(raw,size,'RGB').copy()
                         MONITOR.increment('video.frames_presented_to_ui')
                 except Exception as exc: self.session.status='FRAME: '+type(exc).__name__
-            if dirty or item:
+            # Animate at 10 Hz even when the media clock is frozen.
+            spinner_tick = int(time.monotonic()*10) if self.session.running and self.session.video.whisper_waiting else None
+            animate = spinner_tick != getattr(self, '_spinner_tick', None)
+            self._spinner_tick = spinner_tick
+            if dirty or item or animate:
                 with measure('ui.draw'):
                     if not dirty and not self.video_fullscreen and not self.history_open and not self.show_suggestions and not self.perf_visible:
                         self.draw_video_region(self.video_rect)

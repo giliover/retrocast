@@ -16,23 +16,13 @@ class PanelsMixin:
         # Header: fixed button gutters, input takes remaining space.
         self.rect((20,65,w-40,52))
         self.txt(self.tr('source'),30,82,self.palette.accent,self.small,maxwidth=105)
-        header_gap=12
-        action_widths=(112,100,100)
-        actions_total=sum(action_widths)+2*header_gap
-        actions_x=w-32-actions_total
-        self.url_box=pygame.Rect(145,76,max(100,actions_x-145-header_gap),30)
+        self.url_box=pygame.Rect(145,76,max(100,w-177),30)
         self.rect(self.url_box,self.palette.black,self.palette.accent if self.url_active else self.palette.edge)
         display=self.url or 'twitch / youtube / @canal / URL'
         self.txt(display[-max(10,(self.url_box.width-20)//10):],self.url_box.x+9,self.url_box.y+6,self.palette.text if self.url else self.palette.muted,self.small,maxwidth=self.url_box.width-18)
-        self.button('play',self.tr('watch'),(actions_x,76,action_widths[0],30),active=not self.session.running)
-        self.button('stop',self.tr('stop'),(actions_x+action_widths[0]+header_gap,76,action_widths[1],30))
-        self.button('save',self.tr('save'),(actions_x+action_widths[0]+action_widths[1]+2*header_gap,76,action_widths[2],30))
-        self.button('history',self.tr('history'),(20,121,135,29))
-        self.button('delay_down','- 5s',(170,121,75,29))
-        self.txt(f'BUFFER {self.session.config.delay}s',255,128,self.palette.accent,self.small)
-        self.button('delay_up','+ 5s',(365,121,75,29))
+        self.txt(f'[ENTER] WATCH  [U] SOURCE  [H] HISTORY  |  BUFFER {self.session.config.delay}s  |  [F3] PERFORMANCE',20,128,self.palette.accent,self.small,maxwidth=w-40)
         video_w=max(320,int((w-58)*0.64)); right_x=video_w+38; right_w=w-right_x-20
-        video=pygame.Rect(20,155,video_w,max(1,h-343))
+        video=pygame.Rect(20,155,video_w,max(1,h-303))
         self.video_rect=video
         self.draw_video_region(video)
         self.rect((right_x,video.y,right_w,video.height))
@@ -51,59 +41,20 @@ class PanelsMixin:
         for i,line in enumerate(self.transcript_page.view(rows)):
             self.txt(line,transcript_area.x,transcript_area.y+i*20,self.palette.text,self.small,maxwidth=transcript_area.width)
         self.screen.set_clip(previous)
-        self.button('trans_prev','<', (right_x+right_w-135,video.y+8,26,27))
+
         self.txt(self.transcript_page.label(len(rows)),right_x+right_w-102,video.y+14,self.palette.accent,self.small)
-        self.button('trans_next','>', (right_x+right_w-40,video.y+8,26,27))
-        # Three dedicated rows for playback and settings.
+
+        # Two rows: playback/appearance and processing settings.
         bottom=video.bottom+10
-        self.rect((20,bottom,w-40,132))
-        gap=12
-        x=32
-        for name,label,bw,active in (
-            ('pause',self.tr('pause'),115,False),
-            ('sub',self.tr('sub_on') if self.subtitle else self.tr('sub_off'),135,self.subtitle),
-            ('vol_down','VOL -',90,False),
-            ('vol_up','VOL +',90,False),
-            ('fullscreen',self.tr('fullscreen'),150,False),
-        ):
-            self.button(name,label,(x,bottom+8,bw,34),active)
-            x+=bw+gap
-        self.txt(f'{round(self.volume*100)}%',x+3,bottom+16,self.palette.accent,self.small)
-        # Settings on their own row to avoid the original overlap.
-        options=[
-            ('model',self.tr('model')+': '+self.session.config.model.upper()),
-            ('lang',self.tr('speech')+': '+self.session.config.language.upper()),
-            ('theme',self.tr('theme')+': '+self.preferences.theme.upper()),
-            ('ui_language',self.tr('ui_lang')+': '+self.preferences.language.upper()),
-        ]
-        available=w-64
-        option_width=(available-3*gap)//4
-        for i,(name,label) in enumerate(options):
-            self.button(name,label,(32+i*(option_width+gap),bottom+49,option_width,34))
-        self.draw_video_settings(w,bottom+90)
+        self.rect((20,bottom,w-40,92))
+        self.draw_settings(w,bottom)
         status=self.session.status or self.notice
         self.txt(status,24,h-44,self.palette.warning if 'ERRO' in status or 'VIDEO:' in status else self.palette.muted,self.small,maxwidth=w-48)
-        self.txt(self.tr('hint'),24,h-26,self.palette.accent,self.small,maxwidth=w-48)
+        self.txt('[TAB] AUTOCOMPLETE  [X] STOP  [S] SAVE  [PGUP/PGDN] TRANSCRIPT  [ESC] EXIT',24,h-26,self.palette.accent,self.small,maxwidth=w-48)
         self.draw_suggestions()
         if self.history_open: self.draw_history()
         if self.perf_visible: self.draw_performance()
         pygame.display.flip()
-
-
-    def draw_video_settings(self, width, y):
-        # Three fixed groups, aligned with the settings panel above.
-        gap=12
-        group=(width-64-2*gap)//3
-        x=32
-        config=self.session.config
-        self.button('quality','VIDEO: '+config.quality.upper(),(x,y,group,34))
-        x+=group+gap
-        self.button('priority',self.tr('priority')+': '+self.tr(config.priority),(x,y,group,34))
-        x+=group+gap
-        step=min(40,max(1,(group-12)//4))
-        self.button('fps_down','−',(x,y,step,34))
-        self.button('fps','FPS: '+str(config.fps_limit or 'AUTO'),(x+step+6,y,group-2*step-12,34))
-        self.button('fps_up','+',(x+group-step,y,step,34))
 
 
     def draw_performance(self):
@@ -158,9 +109,6 @@ class PanelsMixin:
             self.txt(f'{self.history_page.page*self.history_page.page_size+i+1:02d}  {url}',rect.x+8,rect.y+6,self.palette.text,self.small,rect.width-15)
             self.history_rects.append((url,rect))
         y=box.bottom-45
-        self.button('history_prev','<', (box.x+20,y,38,28))
-        self.txt(self.history_page.label(len(items)),box.x+72,y+6,self.palette.accent,self.small)
-        self.button('history_next','>', (box.x+135,y,38,28))
-        self.button('history_close',self.tr('close'),(box.right-125,y,105,28))
+        self.txt('[PgUp/PgDn] '+self.history_page.label(len(items))+'  [ESC] '+self.tr('close'),box.x+20,y+6,self.palette.accent,self.small,maxwidth=box.width-40)
 
 

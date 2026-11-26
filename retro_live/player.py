@@ -5,6 +5,7 @@ import time
 import traceback
 from .capture import StreamCapture
 from .playback_policy import DEFAULT_DELAY, PRIORITIES, FPS_CHOICES, LatestAudioQueue, WaitPolicy, effective_fps
+from .whisper_policy import WhisperPolicy
 from collections import deque
 from .packet_buffer import PacketBuffer
 from .video_decoder import decode_video
@@ -45,6 +46,7 @@ class VideoPlayer:
         self.latest = -1.0
         self.position = None
         self._last_frame = None
+        self.presented_video_pts = None
         self._wall = None
         self._play_sample = None
         self._origin = None
@@ -60,6 +62,10 @@ class VideoPlayer:
         self.ai_last_enqueued = None
         self.ai_last_completed = None
         self.ai_active = None
+        self.whisper_policy = WhisperPolicy()
+        self.ai_attempt = 0
+        self.ai_policy = None
+        self.ai_expired = 0
         self.ai_dropped = 0
         self.require_transcription = False
         self.subtitles_enabled = True
@@ -69,11 +75,12 @@ class VideoPlayer:
         self._transcribed_blocks = set()
         self.audio_discontinuities = 0
 
-    def start(self, url, quality='auto', delay=DEFAULT_DELAY, require_transcription=None, priority=None, fps_limit=0, subtitles_enabled=True):
+    def start(self, url, quality='auto', delay=DEFAULT_DELAY, require_transcription=None, priority=None, fps_limit=0, subtitles_enabled=True, whisper_policy=None):
         if not self.close():
             raise RuntimeError('Previous player still stopping')
         self.__init__()
         self.delay = delay
+        self.whisper_policy = whisper_policy or WhisperPolicy()
         self.set_priority(priority or ("balanced" if require_transcription is None else ("subtitle" if require_transcription else "video")))
         self.set_fps_limit(fps_limit)
         self.set_subtitles(subtitles_enabled)
@@ -118,6 +125,22 @@ class VideoPlayer:
             self.fps_limit = limit
         LOG.info('video_fps_limit limit=%s effective=%.2f', limit or 'auto', self.presentation_fps)
 
+    def set_whisper_policy(self, policy):
+        if not isinstance(policy, WhisperPolicy):
+            raise ValueError("Invalid Whisper policy")
+        self.whisper_policy = policy
+        LOG.info("whisper_policy retries=%d wait_timeout=%.1f", policy.retries, policy.timeout)
+
+    def discard_transcription(self, start, end):
+        first = round(start * RATE / BLOCK)
+        last = round(end * RATE / BLOCK)
+        if not 0 <= last - first <= 50:
+            raise ValueError("Invalid transcription interval")
+        with self.lock:
+            for index in range(first, last):
+                if index in self.sound:
+                    self._skipped_blocks.add(index)
+
     def _enqueue_audio(self, job):
         full, dropped = self.jobs.offer(job)
         self.ai_last_enqueued = job[0] + len(job[1])/16000
@@ -150,6 +173,7 @@ class VideoPlayer:
             self._reset_video()
 
     def _reset_video(self):
+        self.presented_video_pts = None
         self._video_generation += 1
         self._video_ready = -1.0
         self._video_target = None
@@ -192,6 +216,7 @@ class VideoPlayer:
             return
         with self.lock:
             if self.paused:
+                self.whisper_waiting = False
                 return
             edge = min(self.latest, self.video_latest)
             if self._play_sample is None:
@@ -248,6 +273,7 @@ class VideoPlayer:
             ready = not self.subtitles_enabled or self._transcription_ready(sample, limit)
             if not self._wait_policy.allows(mode, ready, time.monotonic()):
                 self.whisper_waiting = True
+                self.position = sample / RATE
                 return
             if not ready or sample // BLOCK in self._skipped_blocks:
                 self.ai_bypassed_callbacks += 1
@@ -410,7 +436,7 @@ class VideoPlayer:
             for _ in range(12):
                 if not self.frames or self.frames[0][0] > self.position + .015:
                     break
-                _, item = self.frames.popleft()
+                self.presented_video_pts, item = self.frames.popleft()
             return item
 
     def toggle_pause(self):

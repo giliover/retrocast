@@ -1,4 +1,5 @@
 import pygame
+from .loading import draw_whisper_loading
 from ...performance import measure
 
 
@@ -43,6 +44,7 @@ class VideoMixin:
             for i,line in enumerate(lines):
                 rendered=self.font.render(line,True,self.palette.text)
                 self.screen.blit(rendered,rendered.get_rect(centerx=w//2,y=h-box_h-25+i*line_height))
+        draw_whisper_loading(self, self.screen.get_rect())
         pygame.display.flip()
 
 
@@ -74,3 +76,4 @@ class VideoMixin:
                 self.screen.blit(render,render.get_rect(centerx=video.centerx,y=video.bottom-sh-10+i*24))
 
 
+        draw_whisper_loading(self, video)
