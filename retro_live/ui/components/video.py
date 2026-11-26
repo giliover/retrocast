@@ -15,7 +15,6 @@ class VideoMixin:
             self.video_fullscreen=False
         self._scaled_frame_key=None
         self._scaled_frame=None
-        self.buttons.clear()
 
 
     def draw_fullscreen_video(self):
@@ -39,7 +38,7 @@ class VideoMixin:
             line_height=28
             box_h=len(lines)*line_height+20
             box=pygame.Surface((max(1,w-80),box_h),pygame.SRCALPHA)
-            box.fill((8,12,17,220))
+            box.fill((*self.palette.black,220))
             self.screen.blit(box,(40,h-box_h-35))
             for i,line in enumerate(lines):
                 rendered=self.font.render(line,True,self.palette.text)
@@ -69,7 +68,7 @@ class VideoMixin:
             subtitle_lines=self.wrap(last,video.width-75,self.font)[-3:]
             sh=18+len(subtitle_lines)*24
             surf=pygame.Surface((video.width-28,sh),pygame.SRCALPHA)
-            surf.fill((8,12,17,220))
+            surf.fill((*self.palette.black,220))
             self.screen.blit(surf,(video.x+14,video.bottom-sh-18))
             for i,line in enumerate(subtitle_lines):
                 render=self.font.render(line,True,self.palette.text)

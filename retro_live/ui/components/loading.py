@@ -22,4 +22,4 @@ def draw_whisper_loading(ui, region):
         pygame.draw.circle(ui.screen,color,(x+int(15*math.cos(angle)),y-20+int(15*math.sin(angle))),3)
     ui.txt(ui.tr('whisper_wait'),box.x+10,y+3,ui.palette.text,ui.small,maxwidth=width-20)
     policy = v.ai_policy or v.whisper_policy
-    ui.txt(f"{ui.tr('attempt')}: {v.ai_attempt or '-'} | WAIT: {policy.timeout}s",box.x+10,y+23,ui.palette.muted,ui.tiny,maxwidth=width-20)
+    ui.txt(f"{ui.tr('attempt')}: {v.ai_attempt or '-'} | {ui.tr('timeout')}: {policy.timeout}s",box.x+10,y+23,ui.palette.muted,ui.tiny,maxwidth=width-20)

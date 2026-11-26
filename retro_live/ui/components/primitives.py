@@ -35,26 +35,6 @@ class PrimitivesMixin:
         pygame.draw.rect(self.screen,border,box,1,border_radius=radius)
 
 
-    def button(self, name, label, rect, active=False):
-        self.buttons[name]=pygame.Rect(rect)
-        mouse=pygame.mouse.get_pos()
-        hover=self.buttons[name].collidepoint(mouse)
-        fill=self.palette.accent if active else (self.palette.edge if hover else self.palette.panel)
-        self.rect(rect,fill,self.palette.accent if hover or active else self.palette.edge)
-        font=self.small
-        # Fit labels inside their hit targets without silently clipping text.
-        available=max(8,self.buttons[name].width-16)
-        text_font=font
-        if font.size(label)[0]>available:
-            text_font=self.tiny
-        if text_font.size(label)[0]>available:
-            while label and text_font.size(label+'…')[0]>available:
-                label=label[:-1]
-            label+='…'
-        text=self.render_text(text_font,label,self.palette.black if active else self.palette.text)
-        self.screen.blit(text,text.get_rect(center=self.buttons[name].center))
-
-
     @lru_cache(maxsize=4096)
     def wrap(self, text, max_width, font):
         result=[]; line=''

@@ -22,8 +22,10 @@ from .components.video import VideoMixin
 from .components.panels import PanelsMixin
 from .components.controls import ControlsMixin
 from .components.settings import SettingsMixin
+from .components.keyboard import KeyboardMixin
+from .components.help import HelpMixin
 
-class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsMixin):
+class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsMixin, KeyboardMixin, HelpMixin):
     def __init__(self):
         pygame.init()
         pygame.display.set_caption('RetroCast')
@@ -42,36 +44,33 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsM
         self.video_fullscreen=False
         self._window_size=(1180,800)
         self.subtitle=True
-        self.scroll=0
         self.frame=None
         self.frame_size=None
         self.running=True
-        self.buttons={}
         self.notice=self.tr('ready')
         self.history=SourceHistory()
         self.suggestions=[]
         self.suggestion_idx=0
-        self.suggestion_rects=[]
         self.show_suggestions=False
         self.history_open=False
         self.history_page=Paginator(page_size=9)
         self.suggestions_page=Paginator(page_size=5)
         self.transcript_page=Paginator(page_size=10)
-        self.history_rects=[]
-        self.transcript_rows=[]
+        self.history_index=0
         self.transcript_follow=True
         self.perf_visible=False
+        self.help_open=False
+        self.help_page=0
+        self.help_pages=1
         self.perf_metrics={}
         self.perf_counts={}
-        self._transcript_revision=0
-        self._rows_key=None
         self._scaled_frame=None
         self._scaled_frame_key=None
 
 
     def run(self):
+        pygame.event.set_blocked([pygame.MOUSEMOTION, pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEWHEEL])
         self.draw()
-        hover=None
         while self.running:
             # Block when idle; active video is sampled at the selected FPS cap.
             timeout=max(1, int(1000/self.session.video.presentation_fps)) if self.session.running else 1000
@@ -85,125 +84,19 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsM
             frame_started=time.perf_counter()
             events_started=time.perf_counter()
             for event in events:
-                if event.type==pygame.MOUSEMOTION:
-                    current=next((name for name,rect in self.buttons.items() if rect.collidepoint(event.pos)),None)
-                    dirty=dirty or current!=hover
-                    hover=current
-                elif event.type!=pygame.NOEVENT:
-                    dirty=True
                 if event.type==pygame.QUIT:
                     self.running=False
-                elif event.type==pygame.MOUSEBUTTONDOWN:
-                    if self.video_fullscreen:
-                        continue
-                    if event.button==1:
-                        selected=False
-                        if self.history_open:
-                            chosen=next((url for url,rect in self.history_rects if rect.collidepoint(event.pos)),None)
-                            if chosen:
-                                self.url=chosen; self.history_open=False; self.url_active=True
-                                continue
-                            for name in ('history_prev','history_next','history_close'):
-                                if name in self.buttons and self.buttons[name].collidepoint(event.pos):
-                                    self.action(name); break
-                            continue
-                        for i,rect in self.suggestion_rects:
-                            if rect.collidepoint(event.pos):
-                                self.suggestion_idx=i
-                                self.accept_suggestion()
-                                self.url_active=True
-                                selected=True
-                                break
-                        if selected:
-                            continue
-                        self.url_active=self.url_box.collidepoint(event.pos)
-                        self.show_suggestions=self.url_active
-                        if self.url_active:
-                            self.refresh_suggestions()
-                        for name,rect in self.buttons.items():
-                            if rect.collidepoint(event.pos):
-                                self.action(name)
-                                break
-                    elif event.button in (4,5):
-                        self.navigate_wheel(1 if event.button==4 else -1,event.pos)
-                elif event.type==pygame.MOUSEWHEEL:
-                    if self.video_fullscreen: continue
-                    self.navigate_wheel(event.y,pygame.mouse.get_pos())
                 elif event.type==pygame.KEYDOWN:
-                    if event.key==pygame.K_F11 or (event.key==pygame.K_f and not self.url_active):
-                        self.action('fullscreen')
-                        continue
-                    if self.video_fullscreen:
-                        if event.key==pygame.K_ESCAPE: self.action('fullscreen')
-                        elif event.key==pygame.K_SPACE: self.action('pause')
-                        elif event.key==pygame.K_c: self.action('sub')
-                        elif event.key==pygame.K_UP: self.action('vol_up')
-                        elif event.key==pygame.K_DOWN: self.action('vol_down')
-                        elif event.key==pygame.K_x: self.action('stop'); self.action('fullscreen')
-                        continue
-                    if self.history_open:
-                        if event.key==pygame.K_ESCAPE: self.history_open=False
-                        elif event.key==pygame.K_PAGEUP: self.history_page.move(-1,len(self.history.items))
-                        elif event.key==pygame.K_PAGEDOWN: self.history_page.move(1,len(self.history.items))
-                        continue
-                    if self.url_active:
-                        if event.key==pygame.K_ESCAPE:
-                            self.url_active=False
-                            self.show_suggestions=False
-                        elif event.key==pygame.K_TAB:
-                            self.accept_suggestion()
-                        elif event.key in (pygame.K_DOWN,pygame.K_UP) and self.suggestions:
-                            delta=1 if event.key==pygame.K_DOWN else -1
-                            self.suggestion_idx=(self.suggestion_idx+delta)%len(self.suggestions)
-                            self.suggestions_page.page=self.suggestion_idx//self.suggestions_page.page_size
-                        elif event.key in (pygame.K_PAGEUP,pygame.K_PAGEDOWN):
-                            self.suggestions_page.move(-1 if event.key==pygame.K_PAGEUP else 1,len(self.suggestions))
-                            self.suggestion_idx=min(len(self.suggestions)-1,self.suggestions_page.page*self.suggestions_page.page_size) if self.suggestions else 0
-                        elif event.key==pygame.K_RETURN:
-                            if self.show_suggestions and self.suggestions:
-                                self.accept_suggestion()
-                            else:
-                                self.action('play')
-                        elif event.key==pygame.K_BACKSPACE:
-                            self.url=self.url[:-1]
-                            self.refresh_suggestions()
-                        elif event.key==pygame.K_v and event.mod & pygame.KMOD_CTRL:
-                            try:
-                                import tkinter
-                                root=tkinter.Tk(); root.withdraw()
-                                self.url=(self.url+root.clipboard_get())[:2048]; root.destroy()
-                                self.refresh_suggestions()
-                            except Exception: pass
-                        elif event.unicode and event.unicode.isprintable() and len(self.url)<2048:
-                            self.url+=event.unicode
-                            self.refresh_suggestions()
-                    elif event.key==pygame.K_ESCAPE: self.running=False
-                    elif event.key==pygame.K_RETURN: self.action('play')
-                    elif event.key==pygame.K_SPACE: self.action('pause')
-                    elif event.key==pygame.K_UP: self.action('vol_up')
-                    elif event.key==pygame.K_DOWN: self.action('vol_down')
-                    elif event.key==pygame.K_x: self.action('stop')
-                    elif event.key==pygame.K_s: self.action('save')
-                    elif event.key==pygame.K_m: self.action('model')
-                    elif event.key==pygame.K_l: self.action('lang')
-                    elif event.key==pygame.K_t: self.action('theme')
-                    elif event.key==pygame.K_i: self.action('ui_language')
-                    elif event.key==pygame.K_c: self.action('sub')
-                    elif event.key==pygame.K_F3: self.perf_visible=not self.perf_visible
-                    elif event.key==pygame.K_h: self.action('history')
-                    elif event.key==pygame.K_PAGEUP: self.action('trans_prev')
-                    elif event.key==pygame.K_PAGEDOWN: self.action('trans_next')
-                    elif event.key==pygame.K_u:
-                        self.url_active=True
-                        self.refresh_suggestions()
+                    self.handle_key(event)
+                    dirty=True
+                elif event.type in (pygame.VIDEORESIZE, pygame.WINDOWEXPOSED):
+                    dirty=True
             MONITOR.duration('ui.events', (time.perf_counter()-events_started)*1000)
             if not self.running: break
             old_status=self.session.status
             old_caption=self.session.caption
             with measure('ui.session_poll'):
                 changed=self.session.poll()
-            if changed:
-                self._transcript_revision+=1
             dirty=dirty or changed or old_status!=self.session.status or old_caption!=self.session.caption
             if self.session.running and self.session.video.position is None and self.frame is not None:
                 self.frame=None; self._scaled_frame=None; self._scaled_frame_key=None; dirty=True
@@ -221,7 +114,7 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsM
             self._spinner_tick = spinner_tick
             if dirty or item or animate:
                 with measure('ui.draw'):
-                    if not dirty and not self.video_fullscreen and not self.history_open and not self.show_suggestions and not self.perf_visible:
+                    if not dirty and not self.video_fullscreen and not self.history_open and not self.show_suggestions and not self.perf_visible and not self.help_open:
                         self.draw_video_region(self.video_rect)
                         pygame.display.update(self.video_rect)
                         MONITOR.increment('ui.partial_draws')

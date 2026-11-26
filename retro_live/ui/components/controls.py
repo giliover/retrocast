@@ -15,7 +15,7 @@ class ControlsMixin:
                 self.history.add(self.url)
                 self.show_suggestions=False
                 self.url_active=False
-                self.session.start(); self.session.video.set_volume(self.volume); self._transcript_revision+=1; self.scroll=0; self.frame=None; self._scaled_frame=None; self._scaled_frame_key=None; self.transcript_page.reset(); self.transcript_follow=True
+                self.session.start(); self.session.video.set_volume(self.volume); self.frame=None; self._scaled_frame=None; self._scaled_frame_key=None; self.transcript_page.reset(); self.transcript_follow=True
             elif name in ('delay_down','delay_up'):
                 self.session.config.delay=max(10,min(120,self.session.config.delay+(5 if name=='delay_up' else -5)))
                 self.session.video.set_delay(self.session.config.delay)
@@ -26,10 +26,12 @@ class ControlsMixin:
                 config = self.session.config
                 config.priority = PRIORITIES[(PRIORITIES.index(config.priority)+1)%len(PRIORITIES)]
                 self.session.video.set_priority(config.priority)
-            elif name in ('fps','fps_down','fps_up'):
+            elif name in ('fps','fps_down','fps_up','fps_auto'):
                 config = self.session.config
                 index = FPS_CHOICES.index(config.fps_limit)
-                if name == "fps":
+                if name == "fps_auto":
+                    index = 0
+                elif name == "fps":
                     index = (index+1)%len(FPS_CHOICES)
                 elif name == "fps_down":
                     index = max(1, sum(fps < self.session.video.fps for fps in FPS_CHOICES)-1) if index == 0 else max(1,index-1)
@@ -56,12 +58,20 @@ class ControlsMixin:
                 self.frame=None
                 self._scaled_frame=None
                 self._scaled_frame_key=None
-            elif name=='history': self.history_open=not self.history_open; self.history_page.reset()
+            elif name=='history': self.history_open=not self.history_open; self.history_page.reset(); self.history_index=0
             elif name=='history_close': self.history_open=False
             elif name=='history_prev': self.history_page.move(-1,len(self.history.items))
             elif name=='history_next': self.history_page.move(1,len(self.history.items))
-            elif name=='trans_prev': self.transcript_follow=False; self.transcript_page.move(-1,len(self.transcript_rows))
-            elif name=='trans_next': self.transcript_page.move(1,len(self.transcript_rows)); self.transcript_follow=self.transcript_page.page==self.transcript_page.pages(len(self.transcript_rows))-1
+            elif name in ('trans_prev','trans_next','trans_live'):
+                count=len(self.session.lines)
+                if name=='trans_live':
+                    self.transcript_page.page=self.transcript_page.pages(count)-1
+                    self.transcript_follow=True
+                else:
+                    if self.transcript_follow:
+                        self.transcript_page.page=self.transcript_page.pages(count)-1
+                    self.transcript_page.move(-1 if name=='trans_prev' else 1,count)
+                    self.transcript_follow=name=='trans_next' and self.transcript_page.page==self.transcript_page.pages(count)-1
             elif name=='save': self.session.save()
             elif name=='pause': self.session.video.toggle_pause()
             elif name=='sub':
@@ -104,17 +114,5 @@ class ControlsMixin:
             return
         self.url=self.suggestions[self.suggestion_idx].url
         self.show_suggestions=False
-
-
-    def navigate_wheel(self, delta, pos):
-        if self.history_open:
-            self.history_page.move(-1 if delta>0 else 1,len(self.history.items))
-        elif self.url_active and self.show_suggestions and self.url_box.x<=pos[0]<=self.url_box.right and self.url_box.bottom<=pos[1]<=self.url_box.bottom+200:
-            self.suggestions_page.move(-1 if delta>0 else 1,len(self.suggestions))
-            self.suggestion_idx=min(len(self.suggestions)-1,self.suggestions_page.page*self.suggestions_page.page_size) if self.suggestions else 0
-        else:
-            self.transcript_follow=False
-            self.transcript_page.move(-1 if delta>0 else 1,len(self.transcript_rows))
-            self.transcript_follow=self.transcript_page.page==self.transcript_page.pages(len(self.transcript_rows))-1
 
 

@@ -1,29 +1,16 @@
-"""Keyboard playback help and bounded performance controls."""
+"""Read-only, localized keyboard hints."""
 
 class SettingsMixin:
     def draw_settings(self, width, bottom):
-        c = self.session.config
-        state = 'PAUSED' if self.session.video.paused else 'PLAY'
-        self.txt(f'{state} | [SPACE] Pause  [C] SUB {"ON" if self.subtitle else "OFF"}  [↑/↓] VOL {round(self.volume*100)}%  [F] Fullscreen  [L] AUDIO {c.language.upper()}  [T] THEME  [I] LANG', 32, bottom+17, self.palette.accent, self.small, maxwidth=width-64)
-        strict = c.priority == 'subtitle'
-        performance = (
-            ('quality', 'VIDEO: '+c.quality.upper()),
-            ('priority', self.tr(c.priority)),
-            ('fps', 'FPS: '+str(c.fps_limit or 'AUTO')),
-            ('model', self.tr('model')+': '+c.model.upper()),
-            ('delay_down', 'BUF −'),
-            ('delay_up', 'BUF +'+str(c.delay)+'s'),
-            ('whisper_retries' if strict else None, 'RETRY: '+str(c.whisper_retries if strict else 0)),
-            ('whisper_timeout_down' if strict else None, '−'),
-            ('whisper_timeout' if strict else None, 'WAIT: '+str(c.whisper_timeout if strict else 0)+'s'),
-            ('whisper_timeout_up' if strict else None, '+'),
-        )
-        gap=4
-        cell=max(1,(width-64-9*gap)//10)
-        for i,(name,label) in enumerate(performance):
-            x=32+i*(cell+gap)
-            if name is None:
-                self.rect((x,bottom+49,cell,34))
-                self.txt(label,x+4,bottom+60,self.palette.muted,self.tiny,maxwidth=cell-8)
-            else:
-                self.button(name,label,(x,bottom+49,cell,34))
+        c=self.session.config
+        t=self.tr
+        strict=c.priority=='subtitle'
+        state=t('paused' if self.session.video.paused else 'playing')
+        playback=f"{state}  [{t('space')}] {t('pause_resume')}  [C] {t('sub_on' if self.subtitle else 'sub_off')}  [↑/↓] {t('volume')} {round(self.volume*100)}%  [F] {t('fullscreen')}"
+        performance=f"[Q] {t('quality')}: {c.quality.upper()}  [P] {t(c.priority)}  [V] FPS: {c.fps_limit or t('auto')}  [M] {t('model')}: {c.model.upper()}  [-/=] {t('buffer')}: {c.delay}s"
+        policy=f"[R] {t('retries')}: {c.whisper_retries if strict else 0}  [,/.] {t('timeout')}: {c.whisper_timeout if strict else 0:.1f}s"
+        if not strict: policy+=f" ({t('off')})"
+        # Two logical groups; wrap to two visual lines each as needed.
+        appearance=f"[L] {t('speech')}: {t('auto') if c.language=='auto' else c.language.upper()}  [T] {t('theme')}: {t(self.preferences.theme)}  [I] {t('ui_lang')}: {self.preferences.language.upper()}"
+        for i, line in enumerate((playback, appearance, performance, policy)):
+            self.txt(line,32,bottom+7+i*20,self.palette.accent if i<2 else self.palette.text,self.tiny,maxwidth=width-64)
