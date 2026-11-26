@@ -31,23 +31,14 @@ class PanelsMixin:
         self.button('delay_down','- 5s',(170,121,75,29))
         self.txt(f'BUFFER {self.session.config.delay}s',255,128,self.palette.accent,self.small)
         self.button('delay_up','+ 5s',(365,121,75,29))
-        self.button('quality','VIDEO: '+self.session.config.quality.upper(),(455,121,180,29))
-        # Dedicated responsive row for priority and FPS, independent of video size.
-        control_width=max(1,(w-52)//2)
-        self.button('priority',self.tr('priority')+': '+self.tr(self.session.config.priority), (20,155,control_width,29))
-        fps_label=str(self.session.config.fps_limit or 'AUTO')
-        fx=32+control_width
-        self.button('fps_down','−',(fx,155,40,29))
-        self.button('fps','FPS: '+fps_label,(fx+46,155,max(1,control_width-92),29))
-        self.button('fps_up','+',(fx+control_width-40,155,40,29))
         video_w=max(320,int((w-58)*0.64)); right_x=video_w+38; right_w=w-right_x-20
-        video=pygame.Rect(20,192,video_w,max(220,h-339))
+        video=pygame.Rect(20,155,video_w,max(1,h-343))
         self.video_rect=video
         self.draw_video_region(video)
-        self.rect((right_x,192,right_w,video.height))
-        self.txt(self.tr('transcript').upper(),right_x+14,206,self.palette.accent,self.small,maxwidth=right_w-165)
-        pygame.draw.line(self.screen,self.palette.edge,(right_x+12,235),(right_x+right_w-12,235))
-        transcript_area=pygame.Rect(right_x+12,247,right_w-24,video.height-85)
+        self.rect((right_x,video.y,right_w,video.height))
+        self.txt(self.tr('transcript').upper(),right_x+14,video.y+14,self.palette.accent,self.small,maxwidth=right_w-165)
+        pygame.draw.line(self.screen,self.palette.edge,(right_x+12,video.y+43),(right_x+right_w-12,video.y+43))
+        transcript_area=pygame.Rect(right_x+12,video.y+55,right_w-24,max(1,video.height-85))
         previous=self.screen.get_clip(); self.screen.set_clip(transcript_area)
         key=(right_w, self._transcript_revision)
         if key != self._rows_key:
@@ -60,12 +51,12 @@ class PanelsMixin:
         for i,line in enumerate(self.transcript_page.view(rows)):
             self.txt(line,transcript_area.x,transcript_area.y+i*20,self.palette.text,self.small,maxwidth=transcript_area.width)
         self.screen.set_clip(previous)
-        self.button('trans_prev','<', (right_x+right_w-135,200,26,27))
-        self.txt(self.transcript_page.label(len(rows)),right_x+right_w-102,206,self.palette.accent,self.small)
-        self.button('trans_next','>', (right_x+right_w-40,200,26,27))
-        # Two dedicated rows, with consistent 12px spacing; no overlapping buttons.
+        self.button('trans_prev','<', (right_x+right_w-135,video.y+8,26,27))
+        self.txt(self.transcript_page.label(len(rows)),right_x+right_w-102,video.y+14,self.palette.accent,self.small)
+        self.button('trans_next','>', (right_x+right_w-40,video.y+8,26,27))
+        # Three dedicated rows for playback and settings.
         bottom=video.bottom+10
-        self.rect((20,bottom,w-40,91))
+        self.rect((20,bottom,w-40,132))
         gap=12
         x=32
         for name,label,bw,active in (
@@ -89,6 +80,7 @@ class PanelsMixin:
         option_width=(available-3*gap)//4
         for i,(name,label) in enumerate(options):
             self.button(name,label,(32+i*(option_width+gap),bottom+49,option_width,34))
+        self.draw_video_settings(w,bottom+90)
         status=self.session.status or self.notice
         self.txt(status,24,h-44,self.palette.warning if 'ERRO' in status or 'VIDEO:' in status else self.palette.muted,self.small,maxwidth=w-48)
         self.txt(self.tr('hint'),24,h-26,self.palette.accent,self.small,maxwidth=w-48)
@@ -96,6 +88,22 @@ class PanelsMixin:
         if self.history_open: self.draw_history()
         if self.perf_visible: self.draw_performance()
         pygame.display.flip()
+
+
+    def draw_video_settings(self, width, y):
+        # Three fixed groups, aligned with the settings panel above.
+        gap=12
+        group=(width-64-2*gap)//3
+        x=32
+        config=self.session.config
+        self.button('quality','VIDEO: '+config.quality.upper(),(x,y,group,34))
+        x+=group+gap
+        self.button('priority',self.tr('priority')+': '+self.tr(config.priority),(x,y,group,34))
+        x+=group+gap
+        step=min(40,max(1,(group-12)//4))
+        self.button('fps_down','−',(x,y,step,34))
+        self.button('fps','FPS: '+str(config.fps_limit or 'AUTO'),(x+step+6,y,group-2*step-12,34))
+        self.button('fps_up','+',(x+group-step,y,step,34))
 
 
     def draw_performance(self):

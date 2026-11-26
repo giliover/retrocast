@@ -62,17 +62,21 @@ class VideoPlayer:
         self.ai_active = None
         self.ai_dropped = 0
         self.require_transcription = False
+        self.subtitles_enabled = True
+        self._ai_cutoff = 0
+        self._ai_lock = threading.Lock()
         self.whisper_waiting = False
         self._transcribed_blocks = set()
         self.audio_discontinuities = 0
 
-    def start(self, url, quality='auto', delay=DEFAULT_DELAY, require_transcription=None, priority=None, fps_limit=0):
+    def start(self, url, quality='auto', delay=DEFAULT_DELAY, require_transcription=None, priority=None, fps_limit=0, subtitles_enabled=True):
         if not self.close():
             raise RuntimeError('Previous player still stopping')
         self.__init__()
         self.delay = delay
         self.set_priority(priority or ("balanced" if require_transcription is None else ("subtitle" if require_transcription else "video")))
         self.set_fps_limit(fps_limit)
+        self.set_subtitles(subtitles_enabled)
         self.worker = threading.Thread(target=self._run, args=(url, quality), daemon=True)
         self.worker.start()
 
@@ -85,10 +89,27 @@ class VideoPlayer:
             raise ValueError('Invalid playback priority')
         with self.lock:
             self.priority = priority
-            self.require_transcription = priority == 'subtitle'
+            self.require_transcription = self.subtitles_enabled and priority == 'subtitle'
             self._wait_policy.reset()
             self.whisper_waiting = False
         LOG.info('playback_priority mode=%s', priority)
+
+    def set_subtitles(self, enabled):
+        with self._ai_lock:
+            with self.lock:
+                if self.subtitles_enabled == enabled:
+                    return
+                self.subtitles_enabled = enabled
+                self.require_transcription = enabled and self.priority == 'subtitle'
+                self.whisper_waiting = False
+                self._wait_policy.reset()
+                self._ai_cutoff = max(0, round(self.latest * RATE / BLOCK))
+                self._transcribed_blocks.clear()
+                self._skipped_blocks.clear()
+                self._pcm.clear()
+                self.jobs = LatestAudioQueue(maxsize=8)
+                self.ai_last_enqueued = self.ai_last_completed = None
+        LOG.info('whisper_capture_enabled=%s cutoff_block=%d', enabled, self._ai_cutoff)
 
     def set_fps_limit(self, limit):
         if type(limit) is not int or limit not in FPS_CHOICES:
@@ -163,7 +184,7 @@ class VideoPlayer:
             return True
         first = sample // BLOCK
         last = (sample + count - 1) // BLOCK
-        return all(i in self._transcribed_blocks or i in self._skipped_blocks for i in range(first, last + 1))
+        return all(i < self._ai_cutoff or i in self._transcribed_blocks or i in self._skipped_blocks for i in range(first, last + 1))
 
     def _callback(self, outdata, frames, time_info, status):
         outdata.fill(0)
@@ -223,8 +244,8 @@ class VideoPlayer:
                 self.whisper_waiting = False
                 return
             limit = min(frames, max(0, int(edge*RATE)-sample)) if self._ended else frames
-            mode = 'subtitle' if self.require_transcription else self.priority
-            ready = self._transcription_ready(sample, limit)
+            mode = self.priority if self.subtitles_enabled else 'video'
+            ready = not self.subtitles_enabled or self._transcription_ready(sample, limit)
             if not self._wait_policy.allows(mode, ready, time.monotonic()):
                 self.whisper_waiting = True
                 return
@@ -254,7 +275,8 @@ class VideoPlayer:
                 return
             LOG.warning("audio_pts_discontinuity expected=%.3f actual=%.3f discarded_blocks=%d", expected/RATE, actual/RATE, len(self._pcm))
             self._pending = np.empty((0, 2), dtype=np.float32)
-            self._pcm.clear()
+            with self._ai_lock:
+                self._pcm.clear()
             self._audio_next = max(0, actual // BLOCK * BLOCK)
         self._pending = np.concatenate((self._pending, samples))
         while len(self._pending) >= BLOCK:
@@ -273,13 +295,15 @@ class VideoPlayer:
                     self._transcribed_blocks.discard(oldest)
                     self._skipped_blocks.discard(oldest)
                 self.latest = max(self.latest, (index + 1) * .1)
-            if not self._pcm:
-                self._pcm_start = index * .1
-            self._pcm.append(block.reshape(-1, 3, 2).mean(axis=(1, 2), dtype=np.float32))
-            if len(self._pcm) == 50:
-                job = (self._pcm_start, np.concatenate(self._pcm))
-                self._pcm.clear()
-                self._enqueue_audio(job)
+            with self._ai_lock:
+                if self.subtitles_enabled and index >= self._ai_cutoff:
+                    if not self._pcm:
+                        self._pcm_start = index * .1
+                    self._pcm.append(block.reshape(-1, 3, 2).mean(axis=(1, 2), dtype=np.float32))
+                    if len(self._pcm) == 50:
+                        job = (self._pcm_start, np.concatenate(self._pcm))
+                        self._pcm.clear()
+                        self._enqueue_audio(job)
             self._audio_next += BLOCK
 
     def _run(self, url, quality):
@@ -341,10 +365,11 @@ class VideoPlayer:
                     for converted in resampler.resample(frame):
                         t = self._time(converted)
                         self._store_audio(converted.to_ndarray().T, pts if t is None else t)
-            if self._pcm and not self.stop_flag.is_set():
-                job = (self._pcm_start, np.concatenate(self._pcm))
-                self._pcm.clear()
-                self._enqueue_audio(job)
+            with self._ai_lock:
+                if self.subtitles_enabled and self._pcm and not self.stop_flag.is_set():
+                    job = (self._pcm_start, np.concatenate(self._pcm))
+                    self._pcm.clear()
+                    self._enqueue_audio(job)
             self._capture_done = True
             code = self.capture.returncode()
             if code not in (None, 0) and not self.stop_flag.is_set():

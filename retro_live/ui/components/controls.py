@@ -54,7 +54,9 @@ class ControlsMixin:
             elif name=='trans_next': self.transcript_page.move(1,len(self.transcript_rows)); self.transcript_follow=self.transcript_page.page==self.transcript_page.pages(len(self.transcript_rows))-1
             elif name=='save': self.session.save()
             elif name=='pause': self.session.video.toggle_pause()
-            elif name=='sub': self.subtitle=not self.subtitle
+            elif name=='sub':
+                self.session.set_subtitles(not self.subtitle)
+                self.subtitle=self.session.subtitles_enabled
             elif name=='fullscreen': self.toggle_video_fullscreen()
             elif name=='vol_down': self.volume=round(max(0,self.volume-0.05),2); self.session.video.set_volume(self.volume)
             elif name=='vol_up': self.volume=round(min(1,self.volume+0.05),2); self.session.video.set_volume(self.volume)

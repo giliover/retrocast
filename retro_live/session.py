@@ -26,6 +26,9 @@ class Session:
         self.status = 'PRONTO'
         self.running = False
         self.thread = None
+        self.subtitles_enabled = True
+        self._whisper_stop = Event()
+        self._restart_whisper = False
         self._reset_diagnostics()
 
     def _reset_diagnostics(self):
@@ -53,12 +56,37 @@ class Session:
         self.caption = ""
         self.status = 'CONECTANDO...'
         self.running = True
-        self.video.start(self.config.url, self.config.quality, self.config.delay, priority=self.config.priority, fps_limit=self.config.fps_limit)
+        self.video.start(self.config.url, self.config.quality, self.config.delay, priority=self.config.priority, fps_limit=self.config.fps_limit, subtitles_enabled=self.subtitles_enabled)
         LOG.info("session_started delay=%d", self.config.delay)
-        self.thread = Thread(target=transcribe, args=(replace(self.config), self.video, self.events, self.stop), daemon=True)
+        if self.subtitles_enabled:
+            self._start_whisper()
+
+    def _start_whisper(self):
+        self._whisper_stop = Event()
+        self.thread = Thread(target=transcribe, args=(replace(self.config), self.video, self.events, self._whisper_stop), daemon=True)
         self.thread.start()
 
+    def set_subtitles(self, enabled):
+        if enabled == self.subtitles_enabled:
+            return
+        self.subtitles_enabled = enabled
+        self._whisper_stop.set()
+        self.video.set_subtitles(enabled)
+        self.events = Queue(maxsize=256)
+        self.cues.clear()
+        self.caption = ''
+        self._restart_whisper = enabled and self.running
+        LOG.info('whisper_toggle enabled=%s', enabled)
+
+    def _poll_whisper(self):
+        if self.thread and not self.thread.is_alive():
+            self.thread = None
+        if self._restart_whisper and self.running and self.subtitles_enabled and not self.thread:
+            self._restart_whisper = False
+            self._start_whisper()
+
     def poll(self):
+        self._poll_whisper()
         changed = False
         for _ in range(100):
             try: event = self.events.get_nowait()
@@ -137,6 +165,8 @@ class Session:
     def close(self, save=True):
         """Stop both pipelines. Never start a new one while an old worker lives."""
         self.stop.set()
+        self._whisper_stop.set()
+        self._restart_whisper = False
         self.processes.close()  # Unblocks ffmpeg/stdout reads in transcription.
         video_stopped = self.video.close()
         if self.thread and self.thread.is_alive():
