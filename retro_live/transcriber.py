@@ -27,10 +27,13 @@ def transcribe(config, player, events, stop):
                     break
                 continue
             began = time.monotonic()
+            duration = len(audio)/16000
+            player.ai_active = start
+            MONITOR.increment("ai.jobs_started")
             try:
                 segments, _ = model.transcribe(audio, language=None if config.language == 'auto' else config.language,
                                                beam_size=1, vad_filter=False, condition_on_previous_text=False)
-                count = 0
+                count = rejected = dropped = 0
                 for segment in segments:
                     if stop.is_set():
                         return
@@ -40,13 +43,24 @@ def transcribe(config, player, events, stop):
                             events.put_nowait(Event('cue', (start+segment.start, start+segment.end, text)))
                             count += 1
                         except Full:
+                            dropped += 1
                             MONITOR.increment('ai.cues_dropped')
+                    else:
+                        rejected += 1
                 elapsed = time.monotonic()-began
-                LOG.info('whisper_segment_complete pts=%.2f cues=%d', start, count)
+                player.ai_last_completed = start + duration
+                pos = player.position
+                LOG.info('whisper_segment_complete pts=%.2f end=%.2f cues=%d rejected=%d dropped=%d elapsed=%.3f rtf=%.3f queue=%d playback=%s lead=%s', start, start+duration, count, rejected, dropped, elapsed, elapsed/max(duration,.001), player.jobs.qsize(), pos, None if pos is None else round(start+duration-pos,3))
+                MONITOR.increment('ai.jobs_completed')
+                MONITOR.increment('ai.cues_emitted', count)
+                MONITOR.increment('ai.cues_rejected', rejected)
                 MONITOR.duration('ai.inference', elapsed*1000)
-                MONITOR.duration('ai.realtime_factor_x1000', elapsed/5*1000)
+                MONITOR.duration('ai.realtime_factor_x1000', elapsed/max(duration,.001)*1000)
             except Exception as exc:
-                LOG.error('whisper_segment_failed type=%s trace=%s', type(exc).__name__, ' > '.join(f'{os.path.basename(f.filename)}:{f.lineno}:{f.name}' for f in traceback.extract_tb(exc.__traceback__)))
+                MONITOR.increment('ai.jobs_failed')
+                LOG.error('whisper_segment_failed pts=%.2f type=%s trace=%s', start, type(exc).__name__, ' > '.join(f'{os.path.basename(f.filename)}:{f.lineno}:{f.name}' for f in traceback.extract_tb(exc.__traceback__)))
+            finally:
+                player.ai_active = None
     except Exception as exc:
         LOG.error('whisper_start_failed type=%s', type(exc).__name__)
         try:

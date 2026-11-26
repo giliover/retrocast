@@ -3,6 +3,8 @@ from pathlib import Path
 from queue import Queue, Empty
 from dataclasses import replace
 import logging
+import time
+from .performance import MONITOR
 from .sources import validate_source
 LOG = logging.getLogger("retrocast.application")
 from threading import Event, Thread
@@ -24,6 +26,13 @@ class Session:
         self.status = 'PRONTO'
         self.running = False
         self.thread = None
+        self._reset_diagnostics()
+
+    def _reset_diagnostics(self):
+        self._diag_at = time.monotonic()
+        self._cue_received = self._cue_late = self._cue_evicted = 0
+        self._last_cue_end = None
+        self._caption_hits = self._caption_misses = 0
 
     def start(self):
         if not self.config.url.strip():
@@ -38,6 +47,7 @@ class Session:
         self.processes = ProcessManager()
         self.lines.clear()
         self.cues.clear()
+        self._reset_diagnostics()
         self.caption = ""
         self.status = 'CONECTANDO...'
         self.running = True
@@ -53,12 +63,18 @@ class Session:
             except Empty: break
             if event.kind == 'cue':
                 start, end, text = event.value
+                self._cue_received += 1
+                self._last_cue_end = end
+                if self.video.position is not None and end < self.video.position:
+                    self._cue_late += 1
+                    MONITOR.increment("caption.late")
                 self.lines.append(text)
                 changed = True
                 for slot in range(int(start*10), min(int(end*10)+1, int(start*10)+300)):
                     self.cues[slot] = text
                     if len(self.cues) > 1400:
                         self.cues.pop(next(iter(self.cues)))
+                        self._cue_evicted += 1
             elif event.kind == 'line':
                 self.lines.append(event.value)
                 changed = True
@@ -66,6 +82,20 @@ class Session:
                 self.status = ('ERRO: ' if event.kind == 'error' else '') + event.value
         pos = self.video.position if self.running else None
         caption = self.cues.get(int(pos*10), '') if pos is not None else ''
+        if pos is not None:
+            if caption:
+                self._caption_hits += 1
+            else:
+                self._caption_misses += 1
+        if self.running and time.monotonic() - self._diag_at >= 5:
+            self._diag_at = time.monotonic()
+            v = self.video
+            oldest = next(iter(self.cues), None)
+            newest = next(reversed(self.cues), None)
+            LOG.info('subtitle_sync playback=%s audio_edge=%.3f video_edge=%.3f delay=%d jobs=%d active_pts=%s enqueued_end=%s completed_end=%s cue_end=%s cue_oldest_slot=%s cue_newest_slot=%s slots=%d events=%d received_total=%d late_total=%d evicted_slots_total=%d dropped_jobs_total=%d discontinuities=%d hits=%d misses=%d paused=%s', pos, v.latest, v.video_latest, v.delay, v.jobs.qsize(), v.ai_active, v.ai_last_enqueued, v.ai_last_completed, self._last_cue_end, oldest, newest, len(self.cues), self.events.qsize(), self._cue_received, self._cue_late, self._cue_evicted, v.ai_dropped, v.audio_discontinuities, self._caption_hits, self._caption_misses, v.paused)
+            MONITOR.increment('caption.lookup_hits', self._caption_hits)
+            MONITOR.increment('caption.lookup_misses', self._caption_misses)
+            self._caption_hits = self._caption_misses = 0
         if caption != self.caption:
             self.caption = caption
             changed = True

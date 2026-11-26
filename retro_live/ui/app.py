@@ -1,3 +1,4 @@
+import logging
 """Retro desktop-style pygame UI. No web server."""
 from functools import lru_cache
 import math
@@ -224,6 +225,8 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin):
             MONITOR.duration('ui.actual_fps', self.clock.get_fps())
             report=MONITOR.report_if_due()
             if report:
+                if self.session.running:
+                    logging.getLogger("retrocast.application").info("subtitle_ui enabled=%s caption_present=%s fullscreen=%s frame_present=%s", self.subtitle, bool(self.session.caption), self.video_fullscreen, self.frame is not None)
                 self.perf_metrics,self.perf_counts=report
                 if self.perf_visible: self.draw()
         self.session.close()

@@ -52,6 +52,11 @@ class VideoPlayer:
         self.video_latest = -1.0
         self._ended = False
         self._resume_edge = None
+        self.ai_last_enqueued = None
+        self.ai_last_completed = None
+        self.ai_active = None
+        self.ai_dropped = 0
+        self.audio_discontinuities = 0
 
     def start(self, url, quality='auto', delay=40):
         if not self.close():
@@ -152,6 +157,8 @@ class VideoPlayer:
         expected = self._audio_next + len(self._pending)
         actual = int(round(pts * RATE))
         if abs(actual - expected) > RATE // 2:
+            self.audio_discontinuities += 1
+            LOG.warning("audio_pts_discontinuity expected=%.3f actual=%.3f discarded_blocks=%d", expected/RATE, actual/RATE, len(self._pcm))
             self._pending = np.empty((0, 2), dtype=np.float32)
             self._pcm.clear()
             self._audio_next = max(0, actual // BLOCK * BLOCK)
@@ -175,7 +182,12 @@ class VideoPlayer:
                 self._pcm.clear()
                 try:
                     self.jobs.put_nowait(job)
+                    self.ai_last_enqueued = job[0] + len(job[1])/16000
+                    MONITOR.increment("ai.jobs_enqueued")
                 except Full:
+                    self.ai_dropped += 1
+                    if self.ai_dropped == 1 or self.ai_dropped % 10 == 0:
+                        LOG.warning("ai_queue_full pts=%.2f dropped_total=%d depth=%d", job[0], self.ai_dropped, self.jobs.qsize())
                     MONITOR.increment('ai.jobs_dropped')
             self._audio_next += BLOCK
 
