@@ -56,7 +56,7 @@ jobs:
           esac
       - name: Sign and index
         env:
-          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_PRIVATE_KEY: ${{ vars.APT_GPG_PRIVATE_KEY }}
           APT_GPG_FINGERPRINT: ${{ vars.APT_GPG_FINGERPRINT }}
         run: |
           export GNUPGHOME=$(mktemp -d)
