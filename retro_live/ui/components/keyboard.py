@@ -1,5 +1,6 @@
 """Keyboard-only navigation with explicit modal focus."""
 import pygame as pg
+from retro_live.history_order import order_history, DEFAULT_AVAILABLE_FIRST
 
 ACTIONS = {
     pg.K_RETURN:'play', pg.K_SPACE:'pause', pg.K_UP:'vol_up',
@@ -32,10 +33,13 @@ class KeyboardMixin:
             return
         if self.history_open:
             if key == pg.K_ESCAPE: self.history_open=False
+            elif key == pg.K_o:
+                self.history_available_first=not getattr(self, 'history_available_first', DEFAULT_AVAILABLE_FIRST)
+                self.refresh_history_order()
             elif key in (pg.K_UP,pg.K_DOWN,pg.K_PAGEUP,pg.K_PAGEDOWN,pg.K_HOME,pg.K_END):
                 self.move_history(key)
-            elif key == pg.K_RETURN and self.history.items:
-                self.url=self.history.items[-1-self.history_index]
+            elif key == pg.K_RETURN and self.history_rows:
+                self.url=self.history_rows[self.history_index]
                 self.history_open=False; self.url_active=True; self.show_suggestions=False
             return
         if self.url_active:
@@ -66,9 +70,19 @@ class KeyboardMixin:
         elif key == pg.K_u: self.url_active=True; self.refresh_suggestions()
         elif key in ACTIONS: self.action(ACTIONS[key])
 
+    def refresh_history_order(self, reset=False):
+        previous=getattr(self, "history_rows", ())
+        index=self.history_index
+        selected=previous[index] if not reset and 0 <= index < len(previous) else None
+        status=getattr(self, "history_status", None)
+        self.history_rows=order_history(self.history.items, status.state if status else lambda _: "unknown", getattr(self, "history_available_first", DEFAULT_AVAILABLE_FIRST))
+        self.history_index=self.history_rows.index(selected) if selected in self.history_rows else min(index, max(0,len(self.history_rows)-1))
+        if reset: self.history_index=0
+        self.history_page.page=self.history_index//self.history_page.page_size
+
     def move_history(self, key):
         size=self.history_page.page_size
-        count=len(self.history.items)
+        count=len(self.history_rows)
         if not count: return
         if key == pg.K_HOME: self.history_index=0
         elif key == pg.K_END: self.history_index=count-1

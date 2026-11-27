@@ -3,7 +3,7 @@ import pygame
 
 SHORTCUTS=(
  ('ENTER','watch'), ('U','edit_source'), ('TAB','autocomplete'), ('CTRL+V','paste'),
- ('H','history'), ('SPACE','pause_resume'), ('↑/↓','volume'), ('C','toggle_sub'),
+ ('H','history'), ('O (H)','history_sort_help'), ('SPACE','pause_resume'), ('↑/↓','volume'), ('C','toggle_sub'),
  ('F/F11','fullscreen'), ('X','stop'), ('S','save'), ('L','speech'), ('T','theme'), ('I','ui_lang'),
  ('PgUp/PgDn','navigate'), ('END','return_live'), ('Q','quality'), ('P','priority'), ('V','fps'),
  ('[/]','fps_adjust'), ('A','auto'), ('-/=','buffer_adjust'), ('R','retries'), (',/.','timeout_adjust'),

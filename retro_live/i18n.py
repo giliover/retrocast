@@ -41,3 +41,7 @@ def translate_status(language, status):
 MESSAGES['pt'].update(history_online='DISPONÍVEL', history_offline='OFFLINE', history_checking='VERIFICANDO', history_unknown='SEM STATUS')
 MESSAGES['en'].update(history_online='AVAILABLE', history_offline='OFFLINE', history_checking='CHECKING', history_unknown='UNKNOWN')
 MESSAGES['es'].update(history_online='DISPONIBLE', history_offline='SIN CONEXIÓN', history_checking='COMPROBANDO', history_unknown='SIN ESTADO')
+
+MESSAGES['pt'].update(history_sort='ORDENAR', history_sort_recent='MAIS RECENTES', history_sort_available='DISPONÍVEIS PRIMEIRO', history_sort_help='ALTERNAR ORDEM NO HISTÓRICO')
+MESSAGES['en'].update(history_sort='SORT', history_sort_recent='MOST RECENT', history_sort_available='AVAILABLE FIRST', history_sort_help='TOGGLE HISTORY SORT ORDER')
+MESSAGES['es'].update(history_sort='ORDENAR', history_sort_recent='MÁS RECIENTES', history_sort_available='DISPONIBLES PRIMERO', history_sort_help='CAMBIAR ORDEN DEL HISTORIAL')

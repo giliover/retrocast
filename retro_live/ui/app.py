@@ -8,6 +8,7 @@ import pygame
 from ..sources import suggest, normalize_source
 from ..history import SourceHistory
 from ..history_status import HistoryStatus
+from ..history_order import DEFAULT_AVAILABLE_FIRST
 from ..session import Session
 from ..themes import get_theme, next_theme
 from ..i18n import translate, next_language
@@ -59,6 +60,8 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsM
         self.suggestions_page=Paginator(page_size=5)
         self.transcript_page=Paginator(page_size=10)
         self.history_index=0
+        self.history_rows=()
+        self.history_available_first=DEFAULT_AVAILABLE_FIRST
         self.transcript_follow=True
         self.perf_visible=False
         self.help_open=False
@@ -100,6 +103,8 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsM
             with measure('ui.session_poll'):
                 changed=self.session.poll()
             status_changed=self.history_status.poll(self.history.items, self.history_open)
+            if status_changed and self.history_open and self.history_available_first:
+                self.refresh_history_order()
             dirty=dirty or (status_changed and self.history_open)
             dirty=dirty or changed or old_status!=self.session.status or old_caption!=self.session.caption
             if self.session.running and self.session.video.position is None and self.frame is not None:

@@ -58,7 +58,9 @@ class ControlsMixin:
                 self.frame=None
                 self._scaled_frame=None
                 self._scaled_frame_key=None
-            elif name=='history': self.history_open=not self.history_open; self.history_page.reset(); self.history_index=0
+            elif name=='history':
+                self.history_open=not self.history_open
+                if self.history_open: self.refresh_history_order(reset=True)
             elif name=='history_close': self.history_open=False
             elif name=='history_prev': self.history_page.move(-1,len(self.history.items))
             elif name=='history_next': self.history_page.move(1,len(self.history.items))

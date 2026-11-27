@@ -96,7 +96,9 @@ class PanelsMixin:
         overlay=pygame.Surface((w,h),pygame.SRCALPHA); overlay.fill((*self.palette.black,185)); self.screen.blit(overlay,(0,0))
         self.rect(box,self.palette.panel,self.palette.accent)
         self.txt(self.tr('history').upper(),box.x+20,box.y+18,self.palette.accent,self.large)
-        items=self.history.items[::-1]
+        items=self.history_rows
+        mode=self.tr('history_sort_available') if self.history_available_first else self.tr('history_sort_recent')
+        self.txt(f"[O] {self.tr('history_sort')}: {mode}",box.x+20,box.y+45,self.palette.muted,self.small,maxwidth=box.width-40)
         self.history_page.page_size=min(9,max(1,(box.height-130)//34))
         self.history_page.page=self.history_index//self.history_page.page_size
         for i,url in enumerate(self.history_page.view(items)):
