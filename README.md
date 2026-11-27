@@ -11,7 +11,7 @@ Live stream player with automatic subtitles.
 ```bash
 sudo apt update
 sudo apt install -y curl
-curl -fsSL https://raw.githubusercontent.com/giliover/retrocast/main/setup-apt.sh -o setup-apt.sh
+curl -fsSL https://raw.githubusercontent.com/giliover/retrocast/master/setup-apt.sh -o setup-apt.sh
 bash setup-apt.sh
 ```
 
