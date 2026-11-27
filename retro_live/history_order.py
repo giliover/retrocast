@@ -5,8 +5,8 @@ DEFAULT_AVAILABLE_FIRST = True
 def order_history(items, state, available_first=DEFAULT_AVAILABLE_FIRST):
     if not available_first:
         return tuple(reversed(items))
-    groups = ([], [], [])
+    groups = ([], [])
     for url in reversed(items):
         status = state(url)
-        groups[0 if status == 'online' else 2 if status == 'offline' else 1].append(url)
-    return tuple(groups[0] + groups[1] + groups[2])
+        groups[0 if status == 'online' else 1].append(url)
+    return tuple(groups[0] + groups[1])

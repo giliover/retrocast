@@ -45,3 +45,7 @@ MESSAGES['es'].update(history_online='DISPONIBLE', history_offline='SIN CONEXIÓ
 MESSAGES['pt'].update(history_sort='ORDENAR', history_sort_recent='MAIS RECENTES', history_sort_available='DISPONÍVEIS PRIMEIRO', history_sort_help='ALTERNAR ORDEM NO HISTÓRICO')
 MESSAGES['en'].update(history_sort='SORT', history_sort_recent='MOST RECENT', history_sort_available='AVAILABLE FIRST', history_sort_help='TOGGLE HISTORY SORT ORDER')
 MESSAGES['es'].update(history_sort='ORDENAR', history_sort_recent='MÁS RECIENTES', history_sort_available='DISPONIBLES PRIMERO', history_sort_help='CAMBIAR ORDEN DEL HISTORIAL')
+
+MESSAGES["pt"].update(history_order_fixed="DISPONÍVEIS PRIMEIRO · MAIS RECENTES", history_search="PESQUISAR", history_empty="NENHUM LINK ENCONTRADO", history_search_help="PESQUISAR EM TODO O HISTÓRICO")
+MESSAGES["en"].update(history_order_fixed="AVAILABLE FIRST · MOST RECENT", history_search="SEARCH", history_empty="NO LINKS FOUND", history_search_help="SEARCH ALL HISTORY")
+MESSAGES["es"].update(history_order_fixed="DISPONIBLES PRIMERO · MÁS RECIENTES", history_search="BUSCAR", history_empty="NO SE ENCONTRARON ENLACES", history_search_help="BUSCAR EN TODO EL HISTORIAL")

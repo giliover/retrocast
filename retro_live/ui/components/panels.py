@@ -97,12 +97,16 @@ class PanelsMixin:
         self.rect(box,self.palette.panel,self.palette.accent)
         self.txt(self.tr('history').upper(),box.x+20,box.y+18,self.palette.accent,self.large)
         items=self.history_rows
-        mode=self.tr('history_sort_available') if self.history_available_first else self.tr('history_sort_recent')
-        self.txt(f"[O] {self.tr('history_sort')}: {mode}",box.x+20,box.y+45,self.palette.muted,self.small,maxwidth=box.width-40)
-        self.history_page.page_size=min(9,max(1,(box.height-130)//34))
-        self.history_page.page=self.history_index//self.history_page.page_size
+        self.txt(f"[O] {self.tr('history_sort')}: {self.tr('history_order_fixed' if self.history_available_first else 'history_sort_recent')}",box.x+20,box.y+45,self.palette.muted,self.small,maxwidth=box.width-40)
+        editing=self.history_search_active
+        query=self.history_search_draft if editing else self.history_query
+        search=pygame.Rect(box.x+18,box.y+65,box.width-36,30)
+        self.rect(search,self.palette.black,self.palette.accent if editing else self.palette.edge)
+        self.txt(f"[/] {self.tr('history_search')}: {query}{'_' if editing else ''}",search.x+8,search.y+6,self.palette.text,self.small,maxwidth=search.width-16)
+        if not items:
+            self.txt(self.tr('history_empty'),box.x+20,box.y+110,self.palette.muted,self.small,maxwidth=box.width-40)
         for i,url in enumerate(self.history_page.view(items)):
-            rect=pygame.Rect(box.x+18,box.y+66+i*34,box.width-36,30)
+            rect=pygame.Rect(box.x+18,box.y+102+i*34,box.width-36,30)
             absolute=self.history_page.page*self.history_page.page_size+i
             selected=absolute==self.history_index
             self.rect(rect,self.palette.accent if selected else self.palette.black,self.palette.edge)
@@ -116,6 +120,6 @@ class PanelsMixin:
             self.txt(label,rect.right-label_width-8,rect.y+6,fg,self.small)
             self.txt(f'{absolute+1:02d}  {url}',rect.x+25,rect.y+6,fg,self.small,max(0,rect.width-label_width-45))
         y=box.bottom-45
-        self.txt('[PgUp/PgDn] '+self.history_page.label(len(items))+f" [↑/↓] {self.tr('select')} [ENTER] {self.tr('open')} [ESC] {self.tr('close')}",box.x+20,y+6,self.palette.accent,self.small,maxwidth=box.width-40)
+        self.txt((f"[ENTER] {self.tr('history_search')} [ESC] {self.tr('close')}" if editing else '[PgUp/PgDn] '+self.history_page.label(len(items))+f" [↑/↓] {self.tr('select')} [ENTER] {self.tr('open')} [ESC] {self.tr('close')}"),box.x+20,y+6,self.palette.accent,self.small,maxwidth=box.width-40)
 
 

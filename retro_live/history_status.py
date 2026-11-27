@@ -54,7 +54,6 @@ class HistoryStatus:
         self.jobs = queue.Queue(CAPACITY)
         self.results = queue.Queue(CAPACITY)
         self.stop = threading.Event()
-        self.next_refresh = 0
         self.workers = []
 
     def _start(self):
@@ -85,7 +84,7 @@ class HistoryStatus:
             if not self.stop.is_set():
                 self.results.put_nowait((url, state))
 
-    def request(self, urls):
+    def request(self, urls, force=False):
         if self.stop.is_set():
             return
         now = self.clock()
@@ -93,7 +92,7 @@ class HistoryStatus:
         scheduled = False
         for url in urls:
             entry = self.cache.get(url)
-            if url in self.pending or (entry and entry[1] > now):
+            if url in self.pending or (not force and entry and entry[1] > now):
                 continue
             if len(self.pending) >= CAPACITY:
                 break
@@ -111,23 +110,32 @@ class HistoryStatus:
             except queue.Empty:
                 break
             self.pending.discard(url)
-            self.cache[url] = (state, now + (ERROR_TTL if state == 'unknown' else TTL))
+            if url in history:
+                self.cache[url] = (state, now + (ERROR_TTL if state == 'unknown' else TTL))
             changed = True
-        if visible and now >= self.next_refresh:
-            self.next_refresh = now + 1
-            # History itself is bounded to 30; prune once per second, not per frame.
-            allowed = set(history)
-            for url in tuple(self.cache):
-                if url not in allowed:
-                    del self.cache[url]
-            changed = bool(self.request(reversed(history))) or changed
         return changed
 
+    def cancel_queued(self):
+        """Cancel jobs not yet started; running probes finish within their timeout."""
+        while True:
+            try:
+                url = self.jobs.get_nowait()
+            except queue.Empty:
+                break
+            self.pending.discard(url)
+
     def state(self, url):
+        if url in self.pending:
+            return 'checking'
         entry = self.cache.get(url)
-        if entry and entry[1] > self.clock():
-            return entry[0]
-        return 'checking' if url in self.pending else 'unknown'
+        return entry[0] if entry else 'unknown'
+
+    def prune(self, history):
+        allowed = set(history)
+        for url in tuple(self.cache):
+            if url not in allowed:
+                del self.cache[url]
 
     def close(self):
         self.stop.set()
+        self.cancel_queued()

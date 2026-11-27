@@ -1,6 +1,8 @@
 """Keyboard-only navigation with explicit modal focus."""
 import pygame as pg
-from retro_live.history_order import order_history, DEFAULT_AVAILABLE_FIRST
+import logging
+LOG = logging.getLogger("retrocast.application")
+from retro_live.history_order import order_history
 
 ACTIONS = {
     pg.K_RETURN:'play', pg.K_SPACE:'pause', pg.K_UP:'vol_up',
@@ -32,15 +34,33 @@ class KeyboardMixin:
             elif key in (pg.K_SPACE,pg.K_c,pg.K_UP,pg.K_DOWN): self.action(ACTIONS[key])
             return
         if self.history_open:
-            if key == pg.K_ESCAPE: self.history_open=False
+            if getattr(self, 'history_search_active', False):
+                if key == pg.K_ESCAPE:
+                    self.history_search_active=False
+                    self.history_search_draft=self.history_query
+                elif key == pg.K_RETURN:
+                    self.history_search_active=False
+                    self.history_query=self.history_search_draft.strip()
+                    self.refresh_history_order(reset=True)
+                elif key == pg.K_BACKSPACE:
+                    self.history_search_draft=self.history_search_draft[:-1]
+                elif event.unicode and event.unicode.isprintable() and len(self.history_search_draft)<256:
+                    self.history_search_draft=(self.history_search_draft+event.unicode)[:256]
+                return
+            if key == pg.K_ESCAPE:
+                self.close_history()
             elif key == pg.K_o:
-                self.history_available_first=not getattr(self, 'history_available_first', DEFAULT_AVAILABLE_FIRST)
-                self.refresh_history_order()
+                selected=self.history_rows[self.history_index] if self.history_rows else None
+                self.history_available_first=not getattr(self, 'history_available_first', True)
+                self.refresh_history_order(selected=selected)
+            elif key == pg.K_SLASH:
+                self.history_search_active=True
+                self.history_search_draft=self.history_query
             elif key in (pg.K_UP,pg.K_DOWN,pg.K_PAGEUP,pg.K_PAGEDOWN,pg.K_HOME,pg.K_END):
                 self.move_history(key)
             elif key == pg.K_RETURN and self.history_rows:
                 self.url=self.history_rows[self.history_index]
-                self.history_open=False; self.url_active=True; self.show_suggestions=False
+                self.close_history(); self.url_active=True; self.show_suggestions=False
             return
         if self.url_active:
             if key in (pg.K_PAGEUP,pg.K_PAGEDOWN) and not (self.show_suggestions and self.suggestions):
@@ -70,26 +90,73 @@ class KeyboardMixin:
         elif key == pg.K_u: self.url_active=True; self.refresh_suggestions()
         elif key in ACTIONS: self.action(ACTIONS[key])
 
-    def refresh_history_order(self, reset=False):
-        previous=getattr(self, "history_rows", ())
-        index=self.history_index
-        selected=previous[index] if not reset and 0 <= index < len(previous) else None
-        status=getattr(self, "history_status", None)
-        self.history_rows=order_history(self.history.items, status.state if status else lambda _: "unknown", getattr(self, "history_available_first", DEFAULT_AVAILABLE_FIRST))
-        self.history_index=self.history_rows.index(selected) if selected in self.history_rows else min(index, max(0,len(self.history_rows)-1))
+    def resize_history_page(self):
+        if not hasattr(self, 'screen'): return
+        height=min(460,self.screen.get_size()[1]-70)
+        size=min(9,max(1,(height-160)//34))
+        if size!=self.history_page.page_size:
+            self.history_page.page_size=size
+            self.history_page.page=self.history_index//size
+
+    def close_history(self):
+        self.history_open=False
+        self.history_search_active=False
+        status=getattr(self, 'history_status', None)
+        if status is not None: status.cancel_queued()
+
+    def refresh_history_order(self, reset=False, selected=None):
+        # Snapshot membership only on a user action; page results never move
+        # links across page boundaries (no duplicates or missing rows).
+        status=getattr(self, 'history_status', None)
+        state=status.state if status else lambda _: 'unknown'
+        query=getattr(self, 'history_query', '').casefold()
+        items=[url for url in self.history.items if query in url.casefold()]
+        self.history_rows=order_history(items,state,getattr(self, 'history_available_first', True))
+        if selected in self.history_rows: self.history_index=self.history_rows.index(selected)
         if reset: self.history_index=0
+        self.history_index=min(self.history_index,max(0,len(self.history_rows)-1))
         self.history_page.page=self.history_index//self.history_page.page_size
+        self.request_history_page()
+
+    def request_history_page(self):
+        status=getattr(self, 'history_status', None)
+        if status is None: return
+        status.cancel_queued()
+        status.prune(self.history.items)
+        rows=self.history_page.view(self.history_rows)
+        self.history_batch=tuple(rows)
+        status.request(rows, force=True)
+        LOG.info("history_page_requested page=%d links=%d search=%s", self.history_page.page+1, len(rows), bool(self.history_query))
+
+    def apply_history_results(self):
+        # Called only on completion of a user-triggered batch, never by a timer.
+        status=self.history_status
+        batch=getattr(self,'history_batch', ())
+        if not batch or any(url in status.pending for url in batch): return
+        self.history_batch=()
+        size=self.history_page.page_size
+        start=self.history_page.page*size
+        old=self.history_rows[start:start+size]
+        selected=self.history_rows[self.history_index] if self.history_rows else None
+        # Recover actual recency, not the previous availability ordering.
+        members=set(old)
+        ordered=order_history([url for url in self.history.items if url in members], status.state,getattr(self, 'history_available_first', True))
+        self.history_rows=self.history_rows[:start]+ordered+self.history_rows[start+len(old):]
+        if selected in ordered: self.history_index=start+ordered.index(selected)
+        LOG.info("history_page_completed page=%d links=%d online=%d", self.history_page.page+1, len(ordered), sum(status.state(url)=="online" for url in ordered))
 
     def move_history(self, key):
         size=self.history_page.page_size
         count=len(self.history_rows)
         if not count: return
+        previous=self.history_page.page
         if key == pg.K_HOME: self.history_index=0
         elif key == pg.K_END: self.history_index=count-1
         else:
             step={pg.K_UP:-1,pg.K_DOWN:1,pg.K_PAGEUP:-size,pg.K_PAGEDOWN:size}[key]
             self.history_index=max(0,min(count-1,self.history_index+step))
         self.history_page.page=self.history_index//size
+        if self.history_page.page!=previous: self.request_history_page()
 
     def paste_source(self):
         root=None

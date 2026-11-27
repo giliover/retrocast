@@ -60,10 +60,12 @@ class ControlsMixin:
                 self._scaled_frame_key=None
             elif name=='history':
                 self.history_open=not self.history_open
-                if self.history_open: self.refresh_history_order(reset=True)
-            elif name=='history_close': self.history_open=False
-            elif name=='history_prev': self.history_page.move(-1,len(self.history.items))
-            elif name=='history_next': self.history_page.move(1,len(self.history.items))
+                if self.history_open:
+                    self.history_query=""; self.history_search_draft=""; self.history_search_active=False
+                    self.resize_history_page()
+                    self.refresh_history_order(reset=True)
+                else: self.close_history()
+            elif name=='history_close': self.close_history()
             elif name in ('trans_prev','trans_next','trans_live'):
                 count=len(self.session.lines)
                 if name=='trans_live':

@@ -8,7 +8,6 @@ import pygame
 from ..sources import suggest, normalize_source
 from ..history import SourceHistory
 from ..history_status import HistoryStatus
-from ..history_order import DEFAULT_AVAILABLE_FIRST
 from ..session import Session
 from ..themes import get_theme, next_theme
 from ..i18n import translate, next_language
@@ -56,12 +55,16 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsM
         self.suggestion_idx=0
         self.show_suggestions=False
         self.history_open=False
+        self.history_available_first=True
         self.history_page=Paginator(page_size=9)
         self.suggestions_page=Paginator(page_size=5)
         self.transcript_page=Paginator(page_size=10)
         self.history_index=0
         self.history_rows=()
-        self.history_available_first=DEFAULT_AVAILABLE_FIRST
+        self.history_query=""
+        self.history_search_draft=""
+        self.history_search_active=False
+        self.history_batch=()
         self.transcript_follow=True
         self.perf_visible=False
         self.help_open=False
@@ -95,6 +98,10 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsM
                     self.handle_key(event)
                     dirty=True
                 elif event.type in (pygame.VIDEORESIZE, pygame.WINDOWEXPOSED):
+                    if event.type==pygame.VIDEORESIZE and self.history_open:
+                        old_size=self.history_page.page_size
+                        self.resize_history_page()
+                        if old_size!=self.history_page.page_size: self.request_history_page()
                     dirty=True
             MONITOR.duration('ui.events', (time.perf_counter()-events_started)*1000)
             if not self.running: break
@@ -102,9 +109,9 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsM
             old_caption=self.session.caption
             with measure('ui.session_poll'):
                 changed=self.session.poll()
-            status_changed=self.history_status.poll(self.history.items, self.history_open)
-            if status_changed and self.history_open and self.history_available_first:
-                self.refresh_history_order()
+            status_changed=self.history_status.poll(self.history.items)
+            if status_changed and self.history_open:
+                self.apply_history_results()
             dirty=dirty or (status_changed and self.history_open)
             dirty=dirty or changed or old_status!=self.session.status or old_caption!=self.session.caption
             if self.session.running and self.session.video.position is None and self.frame is not None:

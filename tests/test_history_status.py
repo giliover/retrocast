@@ -28,7 +28,7 @@ class HistoryStatusTests(unittest.TestCase):
             calls.append(url); entered.set(); release.wait(2); return 'online','test'
         status=HistoryStatus(checker=check,clock=lambda:now[0])
         try:
-            self.assertTrue(status.poll([URL],True))
+            self.assertTrue(status.request([URL],force=True))
             self.assertTrue(entered.wait(1))
             self.assertEqual(status.state(URL),'checking')
             self.assertFalse(status.request([URL]))
@@ -39,7 +39,10 @@ class HistoryStatusTests(unittest.TestCase):
             self.assertEqual(status.state(URL),'online')
             self.assertEqual(calls,[URL])
             now[0]+=61
-            self.assertTrue(status.poll([URL],True))
+            self.assertFalse(status.poll([URL],True))
+            self.assertEqual(status.state(URL),"online")
+            self.assertEqual(calls,[URL])
+            self.assertTrue(status.request([URL],force=True))
             self.assertIn(URL,status.pending)
         finally:
             release.set(); status.close()
