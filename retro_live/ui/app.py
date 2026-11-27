@@ -7,6 +7,7 @@ from ..performance import MONITOR, measure
 import pygame
 from ..sources import suggest, normalize_source
 from ..history import SourceHistory
+from ..history_status import HistoryStatus
 from ..session import Session
 from ..themes import get_theme, next_theme
 from ..i18n import translate, next_language
@@ -49,6 +50,7 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsM
         self.running=True
         self.notice=self.tr('ready')
         self.history=SourceHistory()
+        self.history_status=HistoryStatus()
         self.suggestions=[]
         self.suggestion_idx=0
         self.show_suggestions=False
@@ -97,6 +99,8 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsM
             old_caption=self.session.caption
             with measure('ui.session_poll'):
                 changed=self.session.poll()
+            status_changed=self.history_status.poll(self.history.items, self.history_open)
+            dirty=dirty or (status_changed and self.history_open)
             dirty=dirty or changed or old_status!=self.session.status or old_caption!=self.session.caption
             if self.session.running and self.session.video.position is None and self.frame is not None:
                 self.frame=None; self._scaled_frame=None; self._scaled_frame_key=None; dirty=True
@@ -132,6 +136,7 @@ class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsM
                     logging.getLogger("retrocast.application").info("subtitle_ui enabled=%s caption_present=%s fullscreen=%s frame_present=%s", self.subtitle, bool(self.session.caption), self.video_fullscreen, self.frame is not None)
                 self.perf_metrics,self.perf_counts=report
                 if self.perf_visible: self.draw()
+        self.history_status.close()
         self.session.close()
         pygame.quit()
 

@@ -37,3 +37,7 @@ def translate_status(language, status):
             if key == "playing": label += " | " + translate(language,"buffer")
             return label + ": " + tail
     return status
+
+MESSAGES['pt'].update(history_online='DISPONÍVEL', history_offline='OFFLINE', history_checking='VERIFICANDO', history_unknown='SEM STATUS')
+MESSAGES['en'].update(history_online='AVAILABLE', history_offline='OFFLINE', history_checking='CHECKING', history_unknown='UNKNOWN')
+MESSAGES['es'].update(history_online='DISPONIBLE', history_offline='SIN CONEXIÓN', history_checking='COMPROBANDO', history_unknown='SIN ESTADO')

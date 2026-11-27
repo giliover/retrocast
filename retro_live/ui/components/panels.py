@@ -104,7 +104,15 @@ class PanelsMixin:
             absolute=self.history_page.page*self.history_page.page_size+i
             selected=absolute==self.history_index
             self.rect(rect,self.palette.accent if selected else self.palette.black,self.palette.edge)
-            self.txt(f'{absolute+1:02d}  {url}',rect.x+8,rect.y+6,self.palette.black if selected else self.palette.text,self.small,rect.width-15)
+            state=self.history_status.state(url)
+            color={'online':(40,210,90),'offline':(235,65,65),'checking':self.palette.warning,'unknown':self.palette.muted}[state]
+            pygame.draw.circle(self.screen,self.palette.black,(rect.x+13,rect.centery),6)
+            pygame.draw.circle(self.screen,color,(rect.x+13,rect.centery),4)
+            label=self.tr('history_'+state)
+            fg=self.palette.black if selected else self.palette.text
+            label_width=self.small.size(label)[0]
+            self.txt(label,rect.right-label_width-8,rect.y+6,fg,self.small)
+            self.txt(f'{absolute+1:02d}  {url}',rect.x+25,rect.y+6,fg,self.small,max(0,rect.width-label_width-45))
         y=box.bottom-45
         self.txt('[PgUp/PgDn] '+self.history_page.label(len(items))+f" [↑/↓] {self.tr('select')} [ENTER] {self.tr('open')} [ESC] {self.tr('close')}",box.x+20,y+6,self.palette.accent,self.small,maxwidth=box.width-40)
 
