@@ -1,0 +1,80 @@
+name: Debian release
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: read
+concurrency:
+  group: retrocast-apt-release
+  cancel-in-progress: false
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build and validate
+        env:
+          DEB_MAINTAINER: ${{ vars.DEB_MAINTAINER }}
+        run: |
+          version=${GITHUB_REF_NAME#v}
+          [[ $version =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          bash build-deb.sh "$version"
+          bash test-deb.sh "$version"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: debian-package
+          path: dist/*
+          if-no-files-found: error
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    environment: apt-release
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: debian-package
+          path: dist
+      - name: Prepare repository state
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y reprepro gnupg
+          mkdir "$RUNNER_TEMP/site"
+          # Prevent publishing a lower or equal version over the current release.
+          url="https://giliover.github.io/retrocast/apt/dists/trixie/main/binary-amd64/Packages.gz"
+          status=$(curl --silent --show-error --location --output "$RUNNER_TEMP/current.gz" --write-out '%{http_code}' "$url")
+          case "$status" in
+            200) old=$(gzip -dc "$RUNNER_TEMP/current.gz" | awk '/^Version: / {print $2}'); test -n "$old"; dpkg --compare-versions "${GITHUB_REF_NAME#v}" gt "$old" ;;
+            404) echo 'No published index found' ;;
+            *) exit 1 ;;
+          esac
+      - name: Sign and index
+        env:
+          APT_GPG_PRIVATE_KEY: ${{ secrets.APT_GPG_PRIVATE_KEY }}
+          APT_GPG_FINGERPRINT: ${{ vars.APT_GPG_FINGERPRINT }}
+        run: |
+          export GNUPGHOME=$(mktemp -d)
+          trap 'rm -rf "$GNUPGHOME"' EXIT
+          chmod 700 "$GNUPGHOME"
+          printf '%s' "$APT_GPG_PRIVATE_KEY" | gpg --batch --import
+          unset APT_GPG_PRIVATE_KEY
+          version=${GITHUB_REF_NAME#v}
+          (cd dist && sha256sum -c "retrocast_${version}_amd64.deb.sha256")
+          bash packaging/apt/publish.sh "dist/retrocast_${version}_amd64.deb" "$RUNNER_TEMP/site"
+          mkdir "$RUNNER_TEMP/public"
+          cp -a "$RUNNER_TEMP/site/apt" "$RUNNER_TEMP/site/index.html" "$RUNNER_TEMP/site/.nojekyll" "$RUNNER_TEMP/public/"
+          rm -rf "$RUNNER_TEMP/public/apt/db" "$RUNNER_TEMP/public/apt/conf"
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: ${{ runner.temp }}/public
+      - uses: actions/deploy-pages@v4
+        id: deployment
+      - name: Publish release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes
