@@ -1,4 +1,6 @@
-FROM debian:13-slim
+ARG BASE_IMAGE=debian:13-slim
+FROM ${BASE_IMAGE}
+ENV DEBIAN_FRONTEND=noninteractive
 ARG VERSION
 COPY dist/retrocast_${VERSION}_amd64.deb /tmp/retrocast.deb
 RUN apt-get update && apt-get install -y --no-install-recommends /tmp/retrocast.deb

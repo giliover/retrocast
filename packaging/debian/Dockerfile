@@ -1,4 +1,6 @@
-FROM debian:13-slim
+ARG BASE_IMAGE=debian:13-slim
+FROM ${BASE_IMAGE} AS build
+ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
     python3 python3-venv dpkg-dev ca-certificates ffmpeg libportaudio2 \
     libgl1 libx11-6 libstdc++6 libgomp1 \
@@ -17,4 +19,4 @@ ARG VERSION
 ARG DEB_MAINTAINER
 RUN --network=none DEB_MAINTAINER="$DEB_MAINTAINER" bash packaging/debian/build.sh "$VERSION" /home/builder/wheelhouse
 FROM scratch AS export
-COPY --from=0 /home/builder/project/dist/ /
+COPY --from=build /home/builder/project/dist/ /

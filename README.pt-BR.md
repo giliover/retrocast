@@ -4,18 +4,18 @@ Player de transmissões ao vivo com legendas automáticas.
 
 [English](README.md)
 
-## Debian 13 (amd64) — APT
+## Debian, Ubuntu e derivados (amd64) — APT
+
+O script detecta Debian 12/13, Ubuntu 22.04/24.04/26.04 e derivados que identificam uma base compatível. Para outras versões ou arquiteturas, use o `install.sh` abaixo.
 
 ### 1. Configure o repositório
 
 ```bash
 sudo apt update
 sudo apt install -y curl
-curl -fsSL https://raw.githubusercontent.com/giliover/retrocast/main/setup-apt.sh -o setup-apt.sh
+curl -fsSL https://giliover.github.io/retrocast/apt/setup-apt.sh -o setup-apt.sh
 bash setup-apt.sh
 ```
-
-Quando solicitado, informe o fingerprint oficial da chave GPG, obtido com o mantenedor por um canal confiável.
 
 ### 2. Instale
 

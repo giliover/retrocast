@@ -4,18 +4,18 @@ Live stream player with automatic subtitles.
 
 [Português (Brasil)](README.pt-BR.md)
 
-## Debian 13 (amd64) — APT
+## Debian, Ubuntu and derivatives (amd64) — APT
+
+The setup script detects Debian 12/13, Ubuntu 22.04/24.04/26.04 and derivatives that identify a compatible base. For other releases or architectures, use `install.sh` below.
 
 ### 1. Set up the repository
 
 ```bash
 sudo apt update
 sudo apt install -y curl
-curl -fsSL https://raw.githubusercontent.com/giliover/retrocast/main/setup-apt.sh -o setup-apt.sh
+curl -fsSL https://giliover.github.io/retrocast/apt/setup-apt.sh -o setup-apt.sh
 bash setup-apt.sh
 ```
-
-When prompted, enter the official GPG fingerprint obtained from the maintainer through a trusted channel.
 
 ### 2. Install
 
