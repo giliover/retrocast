@@ -4,6 +4,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 ARG VERSION
 COPY dist/retrocast_${VERSION}_amd64.deb /tmp/retrocast.deb
 RUN apt-get update && apt-get install -y --no-install-recommends /tmp/retrocast.deb
+RUN . /etc/os-release && if [ "${VERSION_CODENAME:-}" = resolute ]; then \
+    apt-get install -y --no-install-recommends pulseaudio pulseaudio-utils; \
+    fi
 RUN useradd -m tester
 COPY packaging/debian/smoke-test.sh /usr/local/bin/smoke-test
 USER tester
