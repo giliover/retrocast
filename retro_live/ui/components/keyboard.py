@@ -3,6 +3,7 @@ import pygame as pg
 import logging
 LOG = logging.getLogger("retrocast.application")
 from retro_live.history_order import order_history
+from retro_live.ui.components.text_input import TextCursor
 
 ACTIONS = {
     pg.K_RETURN:'play', pg.K_SPACE:'pause', pg.K_UP:'vol_up',
@@ -38,14 +39,13 @@ class KeyboardMixin:
                 if key == pg.K_ESCAPE:
                     self.history_search_active=False
                     self.history_search_draft=self.history_query
+                    self.field_cursor("history_search_draft").reset(self.history_query)
                 elif key == pg.K_RETURN:
                     self.history_search_active=False
                     self.history_query=self.history_search_draft.strip()
                     self.refresh_history_order(reset=True)
-                elif key == pg.K_BACKSPACE:
-                    self.history_search_draft=self.history_search_draft[:-1]
-                elif event.unicode and event.unicode.isprintable() and len(self.history_search_draft)<256:
-                    self.history_search_draft=(self.history_search_draft+event.unicode)[:256]
+                else:
+                    self.edit_field(event,"history_search_draft",256)
                 return
             if key == pg.K_ESCAPE:
                 self.close_history()
@@ -56,10 +56,12 @@ class KeyboardMixin:
             elif key == pg.K_SLASH:
                 self.history_search_active=True
                 self.history_search_draft=self.history_query
+                self.field_cursor("history_search_draft").reset(self.history_query)
             elif key in (pg.K_UP,pg.K_DOWN,pg.K_PAGEUP,pg.K_PAGEDOWN,pg.K_HOME,pg.K_END):
                 self.move_history(key)
             elif key == pg.K_RETURN and self.history_rows:
                 self.url=self.history_rows[self.history_index]
+                self.field_cursor("url").reset(self.url)
                 self.close_history(); self.url_active=True; self.show_suggestions=False
             return
         if self.url_active:
@@ -77,17 +79,14 @@ class KeyboardMixin:
             elif key == pg.K_RETURN:
                 if self.show_suggestions and self.suggestions: self.accept_suggestion()
                 else: self.action('play')
-            elif key == pg.K_BACKSPACE:
-                self.url=self.url[:-1]; self.refresh_suggestions()
-            elif key == pg.K_v and event.mod & pg.KMOD_CTRL:
-                self.paste_source()
-            elif event.unicode and event.unicode.isprintable() and len(self.url)<2048:
-                self.url+=event.unicode; self.refresh_suggestions()
+            else:
+                if self.edit_field(event,"url",2048): self.refresh_suggestions()
             return
         if key == pg.K_ESCAPE: self.running=False
         elif key in (pg.K_F11,pg.K_f): self.action('fullscreen')
         elif key == pg.K_F3: self.perf_visible=not self.perf_visible
-        elif key == pg.K_u: self.url_active=True; self.refresh_suggestions()
+        elif key == pg.K_u:
+            self.url_active=True; self.field_cursor('url').reset(self.url); self.refresh_suggestions()
         elif key in ACTIONS: self.action(ACTIONS[key])
 
     def resize_history_page(self):
@@ -158,14 +157,38 @@ class KeyboardMixin:
         self.history_page.page=self.history_index//size
         if self.history_page.page!=previous: self.request_history_page()
 
-    def paste_source(self):
+    def field_cursor(self, name):
+        attr = '_cursor_'+name
+        cursor = getattr(self,attr,None)
+        if cursor is None:
+            cursor=TextCursor(); cursor.reset(getattr(self,name,'')); setattr(self,attr,cursor)
+        return cursor
+
+    def edit_field(self,event,name,limit):
+        key=event.key; ctrl=bool(event.mod & pg.KMOD_CTRL)
+        cursor=self.field_cursor(name); old=getattr(self,name,'')
+        value=''
+        if ctrl and key==pg.K_a: command='all'
+        elif ctrl and key==pg.K_u: command='clear'
+        elif ctrl and key==pg.K_v:
+            command='insert'; value=self.read_clipboard()
+        elif key in (pg.K_LEFT,pg.K_RIGHT,pg.K_HOME,pg.K_END,pg.K_BACKSPACE,pg.K_DELETE):
+            command={pg.K_LEFT:'left',pg.K_RIGHT:'right',pg.K_HOME:'home',pg.K_END:'end',pg.K_BACKSPACE:'backspace',pg.K_DELETE:'delete'}[key]
+        elif not ctrl and event.unicode and event.unicode.isprintable():
+            command='insert'; value=event.unicode
+        else: return False
+        new=cursor.edit(old,command,value,limit)
+        setattr(self,name,new)
+        return new!=old
+
+    def read_clipboard(self):
         root=None
         try:
             import tkinter
             root=tkinter.Tk(); root.withdraw()
-            self.url=(self.url+root.clipboard_get())[:2048]
-            self.refresh_suggestions()
+            return root.clipboard_get()
         except Exception:
             self.notice=self.tr('clipboard')
+            return ''
         finally:
             if root is not None: root.destroy()

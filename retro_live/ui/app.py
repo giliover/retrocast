@@ -25,8 +25,9 @@ from .components.controls import ControlsMixin
 from .components.settings import SettingsMixin
 from .components.keyboard import KeyboardMixin
 from .components.help import HelpMixin
+from .components.text_input import TextInputMixin
 
-class RetroUI(PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsMixin, KeyboardMixin, HelpMixin):
+class RetroUI(TextInputMixin, PrimitivesMixin, VideoMixin, PanelsMixin, ControlsMixin, SettingsMixin, KeyboardMixin, HelpMixin):
     def __init__(self):
         pygame.init()
         pygame.display.set_caption('RetroCast')

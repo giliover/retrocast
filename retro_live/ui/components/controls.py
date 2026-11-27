@@ -117,6 +117,7 @@ class ControlsMixin:
         if not self.suggestions:
             return
         self.url=self.suggestions[self.suggestion_idx].url
+        self.field_cursor("url").reset(self.url)
         self.show_suggestions=False
 
 

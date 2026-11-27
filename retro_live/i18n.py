@@ -49,3 +49,7 @@ MESSAGES['es'].update(history_sort='ORDENAR', history_sort_recent='MÁS RECIENTE
 MESSAGES["pt"].update(history_order_fixed="DISPONÍVEIS PRIMEIRO · MAIS RECENTES", history_search="PESQUISAR", history_empty="NENHUM LINK ENCONTRADO", history_search_help="PESQUISAR EM TODO O HISTÓRICO")
 MESSAGES["en"].update(history_order_fixed="AVAILABLE FIRST · MOST RECENT", history_search="SEARCH", history_empty="NO LINKS FOUND", history_search_help="SEARCH ALL HISTORY")
 MESSAGES["es"].update(history_order_fixed="DISPONIBLES PRIMERO · MÁS RECIENTES", history_search="BUSCAR", history_empty="NO SE ENCONTRARON ENLACES", history_search_help="BUSCAR EN TODO EL HISTORIAL")
+
+MESSAGES['pt'].update(move_cursor='MOVER CURSOR NO CAMPO', cursor_edges='INÍCIO / FIM DO CAMPO', select_text='SELECIONAR TODO O TEXTO', clear_field='LIMPAR CAMPO', delete_text='APAGAR CARACTERES', paste='COLAR TEXTO NO CAMPO')
+MESSAGES['en'].update(move_cursor='MOVE FIELD CURSOR', cursor_edges='START / END OF FIELD', select_text='SELECT ALL TEXT', clear_field='CLEAR FIELD', delete_text='DELETE CHARACTERS', paste='PASTE TEXT INTO FIELD')
+MESSAGES['es'].update(move_cursor='MOVER CURSOR DEL CAMPO', cursor_edges='INICIO / FIN DEL CAMPO', select_text='SELECCIONAR TODO EL TEXTO', clear_field='LIMPIAR CAMPO', delete_text='BORRAR CARACTERES', paste='PEGAR TEXTO EN EL CAMPO')
