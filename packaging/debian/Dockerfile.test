@@ -1,0 +1,10 @@
+FROM debian:13-slim
+ARG VERSION
+COPY dist/retrocast_${VERSION}_amd64.deb /tmp/retrocast.deb
+RUN apt-get update && apt-get install -y --no-install-recommends /tmp/retrocast.deb
+RUN useradd -m tester
+COPY packaging/debian/smoke-test.sh /usr/local/bin/smoke-test
+USER tester
+RUN --network=none sh /usr/local/bin/smoke-test "$VERSION"
+USER root
+RUN apt-get remove -y retrocast && test ! -e /usr/bin/retrocast && apt-get install -y /tmp/retrocast.deb || exit 1

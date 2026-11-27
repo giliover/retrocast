@@ -40,3 +40,14 @@ Se os comandos não forem encontrados, execute:
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+## Debian (pacote .deb)
+
+Se você recebeu um pacote Debian compatível com seu sistema:
+
+```bash
+sudo apt install ./retrocast_0.1.0_amd64.deb
+retrocast
+```
+
+Para desinstalar: `sudo apt remove retrocast`. Atualize instalando o novo pacote ou pelo APT quando o repositório estiver disponível. Não utilize os comandos de atualização Git nesta instalação.
